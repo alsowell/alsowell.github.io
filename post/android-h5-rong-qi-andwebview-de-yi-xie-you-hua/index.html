@@ -9,7 +9,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
 
 <link rel="stylesheet" href="https://use.fontawesome.com/releases/v5.7.2/css/all.css" integrity="sha384-fnmOCqbTlWIlj8LyTjo7mOUStjsKC4pOpQbqyi7RrhN7udi9RwhKkMHpvLbHG9Sr" crossorigin="anonymous">
-<link rel="shortcut icon" href="https://alsowell.github.io//favicon.ico?v=1572868423360">
+<link rel="shortcut icon" href="https://alsowell.github.io//favicon.ico?v=1572868986271">
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.10.0/katex.min.css">
 <link rel="stylesheet" href="https://alsowell.github.io//styles/main.css">
 
@@ -30,7 +30,7 @@
   <div class="top-container" data-aos="fade-right">
     <div class="top-header-container">
       <a class="site-title-container" href="https://alsowell.github.io/">
-        <img src="https://alsowell.github.io//images/avatar.png?v=1572868423360" class="site-logo">
+        <img src="https://alsowell.github.io//images/avatar.png?v=1572868986271" class="site-logo">
         <h1 class="site-title">ALSOWELL`Blog</h1>
       </a>
       <div class="menu-btn" @click="menuVisible = !menuVisible">
@@ -321,46 +321,42 @@ fun loadComplete() {
 <li>
 <p>网页劫持</p>
 <ul>
-<li>
-<p>网页劫持一般出现原因为h5界面出现广告等不相干元素</p>
-</li>
-<li>
-<p>出现原因一般为DNS污染(解析到错误域名)或者因为http劫持</p>
-</li>
-<li>
-<p>解决办法：</p>
+<li>网页劫持一般出现原因为h5界面出现广告等不相干元素</li>
+<li>出现原因一般为DNS污染(解析到错误域名)或者因为http劫持</li>
+<li>解决办法：
 <ul>
 <li>全局替换为更安全的HTTPS</li>
 <li>上面有说道Android所有请求都会走到shouldInterceptRequest方法,可以通过使用阿里云的httpDns服务首先对host进行一次域名解析然后将host替换为IP进行请求 此种情况可避免Dns被污染或者http劫持问题</li>
 </ul>
-<pre><code class="language-java"></code></pre>
 </li>
 </ul>
 </li>
 </ul>
-<p>public WebResourceResponse shouldInterceptRequest(WebView view, WebResourceRequest request) {<br>
-......<br>
-URL url = new URL(request.getUrl().toString());<br>
-conn = (HttpURLConnection) url.openConnection();<br>
-// 接口获取IP<br>
-String ip = httpdns.getIpByHostAsync(url.getHost());<br>
-if (ip != null) {<br>
-// 通过HTTPDNS获取IP成功，进行URL替换和HOST头设置<br>
-Log.d(TAG, &quot;Get IP: &quot; + ip + &quot; for host: &quot; + url.getHost() + &quot; from HTTPDNS successfully!&quot;);<br>
-String newUrl = path.replaceFirst(url.getHost(), ip);<br>
-conn = (HttpURLConnection) new URL(newUrl).openConnection();<br>
-// 添加原有头部信息<br>
-if (headers != null) {<br>
-for (Map.Entry&lt;String, String&gt; field : headers.entrySet()) {<br>
-conn.setRequestProperty(field.getKey(), field.getValue());<br>
-}<br>
-}<br>
-// 设置HTTP请求头Host域<br>
-conn.setRequestProperty(&quot;Host&quot;, url.getHost());<br>
-}<br>
-}<br>
-```<br>
-更详细解决办法<a href="https://help.aliyun.com/document_detail/60181.html">参考</a></p>
+<pre><code class="language-java">public WebResourceResponse shouldInterceptRequest(WebView view, WebResourceRequest request) {
+    ......
+      URL url = new URL(request.getUrl().toString());
+      conn = (HttpURLConnection) url.openConnection();
+      // 接口获取IP
+      String ip = httpdns.getIpByHostAsync(url.getHost());
+      if (ip != null) {
+        // 通过HTTPDNS获取IP成功，进行URL替换和HOST头设置
+        Log.d(TAG, &quot;Get IP: &quot; + ip + &quot; for host: &quot; + url.getHost() + &quot; from HTTPDNS successfully!&quot;);
+        String newUrl = path.replaceFirst(url.getHost(), ip);
+        conn = (HttpURLConnection) new URL(newUrl).openConnection();
+        // 添加原有头部信息
+        if (headers != null) {
+          for (Map.Entry&lt;String, String&gt; field : headers.entrySet()) {
+            conn.setRequestProperty(field.getKey(), field.getValue());
+          }
+        }
+        // 设置HTTP请求头Host域
+        conn.setRequestProperty(&quot;Host&quot;, url.getHost());
+      } 
+}
+
+</code></pre>
+<pre><code>	 更详细解决办法[参考](https://help.aliyun.com/document_detail/60181.html)
+</code></pre>
 
             </div>
             
