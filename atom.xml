@@ -2,7 +2,7 @@
 <feed xmlns="http://www.w3.org/2005/Atom">
     <id>https://alsowell.github.io/</id>
     <title>ALSOWELL`Blog</title>
-    <updated>2019-11-05T06:56:31.874Z</updated>
+    <updated>2019-11-05T07:02:15.481Z</updated>
     <generator>https://github.com/jpmonette/feed</generator>
     <link rel="alternate" href="https://alsowell.github.io/"/>
     <link rel="self" href="https://alsowell.github.io//atom.xml"/>
@@ -16,22 +16,20 @@
         <link href="https://alsowell.github.io//post/android-kai-fa-ban-shang-teamviewer-de-zi-dong-bang-ding">
         </link>
         <updated>2019-11-05T01:44:52.000Z</updated>
-        <summary type="html"><![CDATA[<figure data-type="image" tabindex="1"><img src="https://alsowell.github.io//post-images/1572920857956.png" alt=""></figure>
-<h3 id="背景">背景</h3>
+        <summary type="html"><![CDATA[<h3 id="背景">背景</h3>
 <p>  笔者目前从事的项目是线下无人值守的智能终端设备的开发，因此远程功能对异常调试以及异常恢复至关重要。固件经过修改出厂时就已经把teamviewer打入其中，且开发者可以获得root权限。正常流程出厂前会有人员将当前机器的远程绑定到公司账户下。但是如果固件经过恢复出厂设置的操作的话，那么远程就需要重新绑定，所以远程的自动绑定就特别重要。</p>
 ]]></summary>
-        <content type="html"><![CDATA[<figure data-type="image" tabindex="1"><img src="https://alsowell.github.io//post-images/1572920857956.png" alt=""></figure>
-<h3 id="背景">背景</h3>
+        <content type="html"><![CDATA[<h3 id="背景">背景</h3>
 <p>  笔者目前从事的项目是线下无人值守的智能终端设备的开发，因此远程功能对异常调试以及异常恢复至关重要。固件经过修改出厂时就已经把teamviewer打入其中，且开发者可以获得root权限。正常流程出厂前会有人员将当前机器的远程绑定到公司账户下。但是如果固件经过恢复出厂设置的操作的话，那么远程就需要重新绑定，所以远程的自动绑定就特别重要。</p>
 <!-- more -->
 <p>  正常面对这种需求当然首先去找官方文档，但是翻遍Teamviewer提供的api接口也没有找到相关的实现;没办法只好拨打官方提供的技术支持电话进行咨询，经过了无数次的等待终于接通，但是技术人员的回复是不提供这个功能。</p>
 <p>  在官方支持无果的情况下，笔者只好寻找其他的解决思路，通常面对这种问题第一个解决思路是通过抓包去分析绑定流程的数据传输进行解决。拿到所属账户的用户id以及设置的唯一标识：AndroidID去进行模拟绑定。</p>
 <p>调起应用：</p>
-<figure data-type="image" tabindex="2"><img src="https://alsowell.github.io//post-images/1572922168223.jpg" alt=""></figure>
+<figure data-type="image" tabindex="1"><img src="https://alsowell.github.io//post-images/1572922168223.jpg" alt=""></figure>
 <p>点击分配：</p>
-<figure data-type="image" tabindex="3"><img src="https://alsowell.github.io//post-images/1572922822275.jpg" alt=""></figure>
+<figure data-type="image" tabindex="2"><img src="https://alsowell.github.io//post-images/1572922822275.jpg" alt=""></figure>
 <p>分配成功:</p>
-<figure data-type="image" tabindex="4"><img src="https://alsowell.github.io//post-images/1572922885806.jpg" alt=""></figure>
+<figure data-type="image" tabindex="3"><img src="https://alsowell.github.io//post-images/1572922885806.jpg" alt=""></figure>
 <p>  注：笔者公司绑定TeamViewer的方式为通过打开teamviewer分配的固定的url链接通过浏览器调起Teamviewer应用进行绑定。</p>
 <p>  通过抓包可以发现绑定时候去先获取当前机器所属的账户组，然后点击分配按钮时通过获取当前机器的信息去服务器进行当前账户的分配。分配成功后会返回当前机器的远程id和连接时候的密码。<br>
 分析到这里好像已经解决了我们的需求。但是理想很丰满，现实很骨感。一顿骚操作以后发现模拟数据去请求后台也并不能在后台显示这台绑定的设备，这种方法宣告失败。</p>
@@ -43,7 +41,7 @@
 <li>本地是否有数据记录是否绑定</li>
 </ul>
 <p>  毫无疑问去分析本地数据会更快一点，再结合之前说到的情况：机器恢复出厂设置的情况下已经绑定的远程会失效。那么我们可以分析得知本地肯定会存储一些必要的数据。那我们直接去data/data 里面去找一下。找了半天，终于在/data/data/com.teamviewer.host.market/files/global.conf路径下面发现了点东西。</p>
-<figure data-type="image" tabindex="5"><img src="https://alsowell.github.io//post-images/1572931170363.jpg" alt=""></figure>
+<figure data-type="image" tabindex="4"><img src="https://alsowell.github.io//post-images/1572931170363.jpg" alt=""></figure>
 <!-- more -->
 <p>  可以发现OwningManagerAccountName和OwningManagerCompanyName表示当前所属账户信息的。在没有绑定的情况下这两个字段是不存在的。那么问题就解决了。在每次开机时通过判断这两个字段是否去需要绑定。<br>
   是否绑定的问题已经解决了，那么接下来就到了重点。上面的流程分析提到：显示弹窗-&gt;点击弹窗——&gt;绑定完成。首先是判断是否已经进入到绑定的承载界面:</p>
