@@ -3,13 +3,13 @@
   <head>
     <meta charset="utf-8" >
 
-<title>Android H5容器&amp;WebView的一些优化 | ALSOWELL`Blog</title>
+<title>Android WebView的一些优化 | ALSOWELL`Blog</title>
 <meta name="description" content="Never Stop">
 
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
 
 <link rel="stylesheet" href="https://use.fontawesome.com/releases/v5.7.2/css/all.css" integrity="sha384-fnmOCqbTlWIlj8LyTjo7mOUStjsKC4pOpQbqyi7RrhN7udi9RwhKkMHpvLbHG9Sr" crossorigin="anonymous">
-<link rel="shortcut icon" href="https://alsowell.github.io//favicon.ico?v=1572938531821">
+<link rel="shortcut icon" href="https://alsowell.github.io//favicon.ico?v=1572940356622">
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.10.0/katex.min.css">
 <link rel="stylesheet" href="https://alsowell.github.io//styles/main.css">
 
@@ -30,7 +30,7 @@
   <div class="top-container" data-aos="fade-right">
     <div class="top-header-container">
       <a class="site-title-container" href="https://alsowell.github.io/">
-        <img src="https://alsowell.github.io//images/avatar.png?v=1572938531821" class="site-logo">
+        <img src="https://alsowell.github.io//images/avatar.png?v=1572940356622" class="site-logo">
         <h1 class="site-title">ALSOWELL`Blog</h1>
       </a>
       <div class="menu-btn" @click="menuVisible = !menuVisible">
@@ -92,7 +92,7 @@
       <div class="main-container">
         <div class="content-container" data-aos="fade-up">
           <div class="post-detail">
-            <h2 class="post-title">Android H5容器&amp;WebView的一些优化</h2>
+            <h2 class="post-title">Android WebView的一些优化</h2>
             <div class="post-date">2019-11-04</div>
             
               <div class="feature-container" style="background-image: url('https://alsowell.github.io//post-images/android-webview.jpg')">
@@ -100,8 +100,8 @@
             
             <div class="post-content">
               <h1 id="android-h5容器">Android H5容器</h1>
-<p>     WebView是android上面加载h5界面的基础组件。4.4之前使用webkit作为内核,之后采用Chromium内核。高版本的内核在性能以及流畅性方面均会有较大提升。</p>
-<p>    android上查看当前WebView内核版本的两种方式：</p>
+<p>  WebView是android上面加载h5界面的基础组件。4.4之前使用webkit作为内核,之后采用Chromium内核。高版本的内核在性能以及流畅性方面均会有较大提升。</p>
+<p>  android上查看当前WebView内核版本的两种方式：</p>
 <ul>
 <li>chrome浏览器输入  chrome://inspect</li>
 </ul>
@@ -111,27 +111,27 @@
 <img src="https://alsowell.github.io//post-images/1572868135876.png" alt=""></li>
 </ul>
 <h3 id="性能优化">性能优化</h3>
-<p>    一个正常的natvie使用WebView加载网页的流程如下:<br>
+<p>  一个正常的natvie使用WebView加载网页的流程如下:<br>
 <img src="https://alsowell.github.io//post-images/1572868151124.png" alt=""></p>
-<p>    接下来将围绕整个WebView加载流程来进行android端的一些优化。</p>
+<p>  接下来将围绕整个WebView加载流程来进行android端的一些优化。</p>
 <h4 id="webview单独进程进行加载">webview单独进程进行加载</h4>
-<p>     WebView采用单独进程进行,App中大量Web页面的使用容易导致App内存占用巨大，存在内存泄露，崩溃率高等问题，WebView独立进程的使用是解决Android WebView相关问题的一个合理的方案。</p>
-<p>    下图为加载WebView前后内存占用对比（仅打开百度首页）,可以观察,对大内存应用来讲WebView在不断打开网页过程中产生的内存极有可能造成OOM.</p>
+<p>   WebView采用单独进程进行,App中大量Web页面的使用容易导致App内存占用巨大，存在内存泄露，崩溃率高等问题，WebView独立进程的使用是解决Android WebView相关问题的一个合理的方案。</p>
+<p>  下图为加载WebView前后内存占用对比（仅打开百度首页）,可以观察,对大内存应用来讲WebView在不断打开网页过程中产生的内存极有可能造成OOM.</p>
 <ul>
 <li>未加载webview<br>
 <img src="https://alsowell.github.io//post-images/1572868163142.png" alt=""></li>
 <li>webview打开百度<br>
 <img src="https://alsowell.github.io//post-images/1572868178190.png" alt=""></li>
 </ul>
-<p>     主流的方案都是直接采用新开activity单独进程进行WebView加载方案来进行优化。但是针对于单Activity+多fragment架构中,此方案就不能采用在Activity中开启多进程的方式来进行优化。</p>
-<p>    开启多进程的方式有两种：</p>
+<p>   主流的方案都是直接采用新开activity单独进程进行WebView加载方案来进行优化。但是针对于单Activity+多fragment架构中,此方案就不能采用在Activity中开启多进程的方式来进行优化。</p>
+<p>  开启多进程的方式有两种：</p>
 <ul>
 <li>通过在manifest中声明的方式开启。</li>
 <li>通过Jni fork的方式产生,此方式难度较大。</li>
 </ul>
-<p>    考虑到Android四大组件中均可以通过声明的方式进行多进程的创建,可采用在service中动态创建WebView 然后动态添加到WindowManager中（此步需要有悬浮窗权限）。</p>
+<p>  考虑到Android四大组件中均可以通过声明的方式进行多进程的创建,可采用在service中动态创建WebView 然后动态添加到WindowManager中（此步需要有悬浮窗权限）。</p>
 <h4 id="预加载优化">预加载优化</h4>
-<p>    关于WebView加载耗时,分别测试直接加载webview预先加载webview时间对比。</p>
+<p>  关于WebView加载耗时,分别测试直接加载webview预先加载webview时间对比。</p>
 <ul>
 <li>直接加载webview
 <ul>
@@ -189,10 +189,10 @@ webview.loadUrl(&quot;http://www.baidu.com&quot;)
 06-27 17:22:11.642 19569-19569/net.example.webview D/WebViewLoad: 当前时间：1561627331642
 result:36
 </code></pre>
-<p>    可以看到WebView的动态加载创建会耗费大量时间,因此在Android端可以全局创建一个WebView避免重复的资源开销,但随之而来伴随着可能造成的内存泄露需要在开发时注意。</p>
+<p>  可以看到WebView的动态加载创建会耗费大量时间,因此在Android端可以全局创建一个WebView避免重复的资源开销,但随之而来伴随着可能造成的内存泄露需要在开发时注意。</p>
 <h4 id="缓存优化">缓存优化</h4>
-<p>    打开H5网页的过程中往往伴随着大量的js请求以及图片等占用网络的请求,并且每个请求都是串行进行的,这样的实现不仅耗费流量并且在网络情况不佳的情况下对用户带来的观感就是极其影响体验。<br>
-    Android WebView本身已经支持5种缓存策略。</p>
+<p>  打开H5网页的过程中往往伴随着大量的js请求以及图片等占用网络的请求,并且每个请求都是串行进行的,这样的实现不仅耗费流量并且在网络情况不佳的情况下对用户带来的观感就是极其影响体验。<br>
+  Android WebView本身已经支持5种缓存策略。</p>
 <ul>
 <li>浏览器 缓存机制</li>
 <li>Application Cache 缓存机制</li>
@@ -200,7 +200,7 @@ result:36
 <li>Web SQL Database 缓存机制</li>
 <li>Indexed Database 缓存机制</li>
 </ul>
-<p>    对于Android开发来说设置缓存最常用的方式是<br>
+<p>  对于Android开发来说设置缓存最常用的方式是<br>
 获取WebView的setting设置缓存模式</p>
 <pre><code class="language-kotlin">	WebSettings.LOAD_DEFAULT
 	WebSettings.LOAD_NO_CACHE
@@ -210,7 +210,7 @@ result:36
    
 </code></pre>
 <p>缓存模式具体分析<a href="https://www.jianshu.com/p/5e7075f4875f">参考</a></p>
-<p>    Android端如何实现一套更自己可控制的缓存方案,H5页面中每个网络请求的均会回调</p>
+<p>  Android端如何实现一套更自己可控制的缓存方案,H5页面中每个网络请求的均会回调</p>
 <pre><code class="language-kotlin">override fun shouldInterceptRequest(view: WebView?, request: WebResourceRequest?): WebResourceResponse?
 </code></pre>
 <ul>
@@ -295,9 +295,9 @@ fun loadComplete() {
 </li>
 </ul>
 <h4 id="离线包">离线包</h4>
-<p>    离线包的概念即客户端与H5端和服务端共同约定好的一套协议。h5开发完后打包为静态资源通过服务端的配置接口通知到客户端。客户端通过提前拉取的方式进行资源的下载,在客户端真正打开的时候通过shouldInterceptRequest()方法来直接读取本地资源,基本能够达到秒开的优化。</p>
-<p>    此外,在离线包的基础上还可以根据H5每次发布版本的差异进行H5离线包中css、js等资源的差分化,由客户端本地进行增量更新,这样每次下载的文件将会消耗较少的流量。</p>
-<p>    而且，在某个高版本H5离线包发现问题时可以通过事前定义好的jsbridge强制降级到客户端的某个低版本。</p>
+<p>  离线包的概念即客户端与H5端和服务端共同约定好的一套协议。h5开发完后打包为静态资源通过服务端的配置接口通知到客户端。客户端通过提前拉取的方式进行资源的下载,在客户端真正打开的时候通过shouldInterceptRequest()方法来直接读取本地资源,基本能够达到秒开的优化。</p>
+<p>  此外,在离线包的基础上还可以根据H5每次发布版本的差异进行H5离线包中css、js等资源的差分化,由客户端本地进行增量更新,这样每次下载的文件将会消耗较少的流量。</p>
+<p>  而且，在某个高版本H5离线包发现问题时可以通过事前定义好的jsbridge强制降级到客户端的某个低版本。</p>
 <ul>
 <li>方案难点
 <ul>
@@ -358,8 +358,7 @@ fun loadComplete() {
 }
 
 </code></pre>
-<pre><code>	 更详细解决办法[参考](https://help.aliyun.com/document_detail/60181.html)
-</code></pre>
+<p>  更详细解决办法<a href="https://help.aliyun.com/document_detail/60181.html">参考</a></p>
 
             </div>
             
