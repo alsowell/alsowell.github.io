@@ -2,7 +2,7 @@
 <feed xmlns="http://www.w3.org/2005/Atom">
     <id>https://alsowell.github.io/</id>
     <title>ALSOWELL`Blog</title>
-    <updated>2019-11-05T04:11:40.879Z</updated>
+    <updated>2019-11-05T06:56:31.874Z</updated>
     <generator>https://github.com/jpmonette/feed</generator>
     <link rel="alternate" href="https://alsowell.github.io/"/>
     <link rel="self" href="https://alsowell.github.io//atom.xml"/>
@@ -42,9 +42,33 @@
 <li>通过api去获取当前机器是否已经绑定</li>
 <li>本地是否有数据记录是否绑定</li>
 </ul>
-<p>  毫无疑问去分析本地数据会更快一点，再结合之前说到的情况：机器恢复出厂设置的情况下已经绑定的远程会失效。那么我们可以分析得知本地肯定会存储一些必要的数据。那我们直接去data/data 里面去找一下。</p>
+<p>  毫无疑问去分析本地数据会更快一点，再结合之前说到的情况：机器恢复出厂设置的情况下已经绑定的远程会失效。那么我们可以分析得知本地肯定会存储一些必要的数据。那我们直接去data/data 里面去找一下。找了半天，终于在/data/data/com.teamviewer.host.market/files/global.conf路径下面发现了点东西。</p>
+<figure data-type="image" tabindex="5"><img src="https://alsowell.github.io//post-images/1572931170363.jpg" alt=""></figure>
 <!-- more -->
-<p>  </p>
+<p>  可以发现OwningManagerAccountName和OwningManagerCompanyName表示当前所属账户信息的。在没有绑定的情况下这两个字段是不存在的。那么问题就解决了。在每次开机时通过判断这两个字段是否去需要绑定。<br>
+  是否绑定的问题已经解决了，那么接下来就到了重点。上面的流程分析提到：显示弹窗-&gt;点击弹窗——&gt;绑定完成。首先是判断是否已经进入到绑定的承载界面:</p>
+<pre><code class="language-kotlin">    private fun getTopService(): Boolean {
+        val exec = Shell(true).exec(&quot;dumpsys activity | grep  mFocusedActivity&quot;)
+        return exec.message.contains(&quot;com.teamviewer.host.ui.HostActivity&quot;)
+    }
+</code></pre>
+<h3 id="判断弹窗">判断弹窗</h3>
+<p>  通过获取位于栈顶的进程来判断是否浏览器成功调起应用，然后是判断弹窗是否显示以及按钮的位置，方法比较多：1.我们知道Android的窗口都是通过WinddowManager来管理的，WindowManager是一种方式；<br>
+2.另外一种方法是通过uiautomatorviewer来获取。这里着重讲一下uiautomatorviewer的方式。平常在开发过程中我们经常会使用Android sdk tools下面的uiautomatorviewer来获取当前屏幕正在显示的View层级关系以及所属位置。<br>
+<img src="https://alsowell.github.io//post-images/1572934681994.jpg" alt=""><br>
+<img src="https://alsowell.github.io//post-images/1572934977185.jpg" alt=""></p>
+<p>  同样的我们可以直接在Android 的shell环境下直接执行</p>
+<pre><code class="language-kotlin"> Shell(true).exec(&quot;uiautomator dump&quot;)
+</code></pre>
+<p>  执行这个命令，会直接在sdcard下生成一个window_dump.xml文件。我们通过解析xml分析出来当前是否处于弹窗状态以及需要模拟点击的按钮位置。</p>
+<h3 id="模拟点击">模拟点击</h3>
+<p>  说到模拟点击，你脑子里第一个想到的是什么？大多数情况下可能想到的都是AccessibilityService。AccessibilityService根据官方的介绍，是指开发者通过增加类似contentDescription的属性，从而在不修改代码的情况下，让残障人士能够获得使用体验的优化，大家可以打开AccessibilityService来试一下，点击区域，可以有语音或者触摸的提示，帮助残障人士使用App（这段介绍是我抄的）。但是AccessibilityService使用的前提是需要用户手动授权，Android默认是关闭的，对于笔者的业务场景是无法满足需求的。</p>
+<p>  那可以考虑另外一种思路，直接输入input事件。我们在平常开发中经常会用到adb shell input tap xx xx 来表示一个点击事件。xx xx 代表Android坐标系下的坐标。同样的还有swipe代表滑动。插一句题外话 adb shell 工具使用的好对于平常的开发是大有裨益的。</p>
+<pre><code class="language-kotlin">Shell(true).exec(&quot;input tap xxx xxx&quot;)
+</code></pre>
+<p>  到此，我们已经解决了模拟点击的步骤。点击完成再去本地文件中看一下发现所属的账户信息已经写入成功了。同时在后台也发现了这台设备已经在线，可以愉快的连接上去搞事情啦。</p>
+<h3 id="总结">总结</h3>
+<p>  以上就是笔者面对这个需求从懵逼到最后实现的过程整个需求的实现过程。事后看来有很多没有按照Android开发规范来进行操作，如获取弹窗是直接dump出xml来进行解析而不是通过WindowManager来进行操作。但是想分享的是整个需求的实现思路。希望能对你有一点点帮助。</p>
 ]]></content>
     </entry>
     <entry>
