@@ -2,7 +2,7 @@
 <feed xmlns="http://www.w3.org/2005/Atom">
     <id>https://alsowell.github.io/</id>
     <title>ALSOWELL`Blog</title>
-    <updated>2019-11-04T12:05:14.230Z</updated>
+    <updated>2019-11-05T04:10:44.189Z</updated>
     <generator>https://github.com/jpmonette/feed</generator>
     <link rel="alternate" href="https://alsowell.github.io/"/>
     <link rel="self" href="https://alsowell.github.io//atom.xml"/>
@@ -10,6 +10,43 @@
     <logo>https://alsowell.github.io//images/avatar.png</logo>
     <icon>https://alsowell.github.io//favicon.ico</icon>
     <rights>All rights reserved 2019, ALSOWELL`Blog</rights>
+    <entry>
+        <title type="html"><![CDATA[Android开发板上TeamViewer的自动绑定]]></title>
+        <id>https://alsowell.github.io//post/android-kai-fa-ban-shang-teamviewer-de-zi-dong-bang-ding</id>
+        <link href="https://alsowell.github.io//post/android-kai-fa-ban-shang-teamviewer-de-zi-dong-bang-ding">
+        </link>
+        <updated>2019-11-05T01:44:52.000Z</updated>
+        <summary type="html"><![CDATA[<figure data-type="image" tabindex="1"><img src="https://alsowell.github.io//post-images/1572920857956.png" alt=""></figure>
+<h3 id="背景">背景</h3>
+<p>  笔者目前从事的项目是线下无人值守的智能终端设备的开发，因此远程功能对异常调试以及异常恢复至关重要。固件经过修改出厂时就已经把teamviewer打入其中，且开发者可以获得root权限。正常流程出厂前会有人员将当前机器的远程绑定到公司账户下。但是如果固件经过恢复出厂设置的操作的话，那么远程就需要重新绑定，所以远程的自动绑定就特别重要。</p>
+]]></summary>
+        <content type="html"><![CDATA[<figure data-type="image" tabindex="1"><img src="https://alsowell.github.io//post-images/1572920857956.png" alt=""></figure>
+<h3 id="背景">背景</h3>
+<p>  笔者目前从事的项目是线下无人值守的智能终端设备的开发，因此远程功能对异常调试以及异常恢复至关重要。固件经过修改出厂时就已经把teamviewer打入其中，且开发者可以获得root权限。正常流程出厂前会有人员将当前机器的远程绑定到公司账户下。但是如果固件经过恢复出厂设置的操作的话，那么远程就需要重新绑定，所以远程的自动绑定就特别重要。</p>
+<!-- more -->
+<p>  正常面对这种需求当然首先去找官方文档，但是翻遍Teamviewer提供的api接口也没有找到相关的实现;没办法只好拨打官方提供的技术支持电话进行咨询，经过了无数次的等待终于接通，但是技术人员的回复是不提供这个功能。</p>
+<p>  在官方支持无果的情况下，笔者只好寻找其他的解决思路，通常面对这种问题第一个解决思路是通过抓包去分析绑定流程的数据传输进行解决。拿到所属账户的用户id以及设置的唯一标识：AndroidID去进行模拟绑定。</p>
+<p>调起应用：</p>
+<figure data-type="image" tabindex="2"><img src="https://alsowell.github.io//post-images/1572922168223.jpg" alt=""></figure>
+<p>点击分配：</p>
+<figure data-type="image" tabindex="3"><img src="https://alsowell.github.io//post-images/1572922822275.jpg" alt=""></figure>
+<p>分配成功:</p>
+<figure data-type="image" tabindex="4"><img src="https://alsowell.github.io//post-images/1572922885806.jpg" alt=""></figure>
+<p>  注：笔者公司绑定TeamViewer的方式为通过打开teamviewer分配的固定的url链接通过浏览器调起Teamviewer应用进行绑定。</p>
+<p>  通过抓包可以发现绑定时候去先获取当前机器所属的账户组，然后点击分配按钮时通过获取当前机器的信息去服务器进行当前账户的分配。分配成功后会返回当前机器的远程id和连接时候的密码。<br>
+分析到这里好像已经解决了我们的需求。但是理想很丰满，现实很骨感。一顿骚操作以后发现模拟数据去请求后台也并不能在后台显示这台绑定的设备，这种方法宣告失败。</p>
+<p>  我们再回头分析一下,Teamviewer内部的绑定并不是透明的，我们仅仅通过抓包的数据去进行hook好像并不代表它内部的所有流程。可能在进行网络请求后还进行了其他的操作，但是我们并不能知道。分析到这里下一步好像应该去做反编译去获取到它内部的流程操作。但是笔者再一顿骚操作后发现其内部进行了混淆，并且之前对反编译也没有什么研究，那么这种解决思路暂时先放一放。</p>
+<p>  我们再分析一下正常绑定的流程，手动打开一个链接-&gt;通过浏览器调起应用-&gt;点击应用内的分配按钮-&gt;分配成功。整个过程关键的一步是手动点击按钮去实现。机智的你可能已经知道我们下一步的思路是通过模拟点击去进行自动绑定的实现。</p>
+<p>  但是模拟点击的实现有个问题，我们不可能每次开机以后都去进行一次模拟点击的操作，在已经绑定的情况下再去做重复的点击无疑是多此一举。那么就需要去分析是否已经绑定过，正常的思路有两个：</p>
+<ul>
+<li>通过api去获取当前机器是否已经绑定</li>
+<li>本地是否有数据记录是否绑定</li>
+</ul>
+<p>  毫无疑问去分析本地数据会更快一点，再结合之前说到的情况：机器恢复出厂设置的情况下已经绑定的远程会失效。那么我们可以分析得知本地肯定会存储一些必要的数据。那我们直接去data/data 里面去找一下。</p>
+<!-- more -->
+<p>  </p>
+]]></content>
+    </entry>
     <entry>
         <title type="html"><![CDATA[Android H5容器&WebView的一些优化]]></title>
         <id>https://alsowell.github.io//post/android-webview</id>

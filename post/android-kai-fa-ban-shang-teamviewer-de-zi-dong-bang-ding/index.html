@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" >
+
+<title>Android开发板上TeamViewer的自动绑定 | ALSOWELL`Blog</title>
+<meta name="description" content="Never Stop">
+
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+
+<link rel="stylesheet" href="https://use.fontawesome.com/releases/v5.7.2/css/all.css" integrity="sha384-fnmOCqbTlWIlj8LyTjo7mOUStjsKC4pOpQbqyi7RrhN7udi9RwhKkMHpvLbHG9Sr" crossorigin="anonymous">
+<link rel="shortcut icon" href="https://alsowell.github.io//favicon.ico?v=1572927034921">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.10.0/katex.min.css">
+<link rel="stylesheet" href="https://alsowell.github.io//styles/main.css">
+
+
+
+<script src="https://cdn.jsdelivr.net/npm/vue/dist/vue.js"></script>
+<script src="https://cdn.bootcss.com/highlight.js/9.12.0/highlight.min.js"></script>
+
+<link rel="stylesheet" href="https://unpkg.com/aos@next/dist/aos.css" />
+
+
+
+  </head>
+  <body>
+    <div id="app" class="main">
+
+      <div class="sidebar" :class="{ 'full-height': menuVisible }">
+  <div class="top-container" data-aos="fade-right">
+    <div class="top-header-container">
+      <a class="site-title-container" href="https://alsowell.github.io/">
+        <img src="https://alsowell.github.io//images/avatar.png?v=1572927034921" class="site-logo">
+        <h1 class="site-title">ALSOWELL`Blog</h1>
+      </a>
+      <div class="menu-btn" @click="menuVisible = !menuVisible">
+        <div class="line"></div>
+      </div>
+    </div>
+    <div>
+      
+        
+          <a href="/" class="site-nav">
+            首页
+          </a>
+        
+      
+        
+          <a href="/archives" class="site-nav">
+            归档
+          </a>
+        
+      
+        
+          <a href="/tags" class="site-nav">
+            标签
+          </a>
+        
+      
+        
+          <a href="/post/about" class="site-nav">
+            关于
+          </a>
+        
+      
+    </div>
+  </div>
+  <div class="bottom-container" data-aos="flip-up" data-aos-offset="0">
+    <div class="social-container">
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    </div>
+    <div class="site-description">
+      Never Stop
+    </div>
+    <div class="site-footer">
+      Powered by <a href="https://github.com/getgridea/gridea" target="_blank">Gridea</a> | <a class="rss" href="https://alsowell.github.io//atom.xml" target="_blank">RSS</a>
+    </div>
+  </div>
+</div>
+
+
+      <div class="main-container">
+        <div class="content-container" data-aos="fade-up">
+          <div class="post-detail">
+            <h2 class="post-title">Android开发板上TeamViewer的自动绑定</h2>
+            <div class="post-date">2019-11-05</div>
+            
+              <div class="feature-container" style="background-image: url('https://alsowell.github.io//post-images/android-kai-fa-ban-shang-teamviewer-de-zi-dong-bang-ding.png')">
+              </div>
+            
+            <div class="post-content">
+              <figure data-type="image" tabindex="1"><img src="https://alsowell.github.io//post-images/1572920857956.png" alt=""></figure>
+<h3 id="背景">背景</h3>
+<p>  笔者目前从事的项目是线下无人值守的智能终端设备的开发，因此远程功能对异常调试以及异常恢复至关重要。固件经过修改出厂时就已经把teamviewer打入其中，且开发者可以获得root权限。正常流程出厂前会有人员将当前机器的远程绑定到公司账户下。但是如果固件经过恢复出厂设置的操作的话，那么远程就需要重新绑定，所以远程的自动绑定就特别重要。</p>
+<!-- more -->
+<p>  正常面对这种需求当然首先去找官方文档，但是翻遍Teamviewer提供的api接口也没有找到相关的实现;没办法只好拨打官方提供的技术支持电话进行咨询，经过了无数次的等待终于接通，但是技术人员的回复是不提供这个功能。</p>
+<p>  在官方支持无果的情况下，笔者只好寻找其他的解决思路，通常面对这种问题第一个解决思路是通过抓包去分析绑定流程的数据传输进行解决。拿到所属账户的用户id以及设置的唯一标识：AndroidID去进行模拟绑定。</p>
+<p>调起应用：</p>
+<figure data-type="image" tabindex="2"><img src="https://alsowell.github.io//post-images/1572922168223.jpg" alt=""></figure>
+<p>点击分配：</p>
+<figure data-type="image" tabindex="3"><img src="https://alsowell.github.io//post-images/1572922822275.jpg" alt=""></figure>
+<p>分配成功:</p>
+<figure data-type="image" tabindex="4"><img src="https://alsowell.github.io//post-images/1572922885806.jpg" alt=""></figure>
+<p>  注：笔者公司绑定TeamViewer的方式为通过打开teamviewer分配的固定的url链接通过浏览器调起Teamviewer应用进行绑定。</p>
+<p>  通过抓包可以发现绑定时候去先获取当前机器所属的账户组，然后点击分配按钮时通过获取当前机器的信息去服务器进行当前账户的分配。分配成功后会返回当前机器的远程id和连接时候的密码。<br>
+分析到这里好像已经解决了我们的需求。但是理想很丰满，现实很骨感。一顿骚操作以后发现模拟数据去请求后台也并不能在后台显示这台绑定的设备，这种方法宣告失败。</p>
+<p>  我们再回头分析一下,Teamviewer内部的绑定并不是透明的，我们仅仅通过抓包的数据去进行hook好像并不代表它内部的所有流程。可能在进行网络请求后还进行了其他的操作，但是我们并不能知道。分析到这里下一步好像应该去做反编译去获取到它内部的流程操作。但是笔者再一顿骚操作后发现其内部进行了混淆，并且之前对反编译也没有什么研究，那么这种解决思路暂时先放一放。</p>
+<p>  我们再分析一下正常绑定的流程，手动打开一个链接-&gt;通过浏览器调起应用-&gt;点击应用内的分配按钮-&gt;分配成功。整个过程关键的一步是手动点击按钮去实现。机智的你可能已经知道我们下一步的思路是通过模拟点击去进行自动绑定的实现。</p>
+<p>  但是模拟点击的实现有个问题，我们不可能每次开机以后都去进行一次模拟点击的操作，在已经绑定的情况下再去做重复的点击无疑是多此一举。那么就需要去分析是否已经绑定过，正常的思路有两个：</p>
+<ul>
+<li>通过api去获取当前机器是否已经绑定</li>
+<li>本地是否有数据记录是否绑定</li>
+</ul>
+<p>  毫无疑问去分析本地数据会更快一点，再结合之前说到的情况：机器恢复出厂设置的情况下已经绑定的远程会失效。那么我们可以分析得知本地肯定会存储一些必要的数据。那我们直接去data/data 里面去找一下。</p>
+<!-- more -->
+<p>  </p>
+
+            </div>
+            
+            
+              <div class="next-post">
+                <div class="next">下一篇</div>
+                <a href="https://alsowell.github.io//post/android-webview">
+                  <h3 class="post-title">
+                    Android H5容器&amp;WebView的一些优化
+                  </h3>
+                </a>
+              </div>
+            
+
+            
+
+          </div>
+
+        </div>
+      </div>
+    </div>
+
+    <script src="https://unpkg.com/aos@next/dist/aos.js"></script>
+
+<script type="application/javascript">
+
+AOS.init();
+
+hljs.initHighlightingOnLoad()
+
+var app = new Vue({
+  el: '#app',
+  data: {
+    menuVisible: false,
+  },
+})
+
+</script>
+
+
+
+
+  </body>
+</html>
