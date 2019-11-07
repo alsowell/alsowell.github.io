@@ -2,7 +2,7 @@
 <feed xmlns="http://www.w3.org/2005/Atom">
     <id>https://alsowell.github.io/</id>
     <title>ALSOWELL`Blog</title>
-    <updated>2019-11-05T07:52:42.039Z</updated>
+    <updated>2019-11-07T07:37:28.771Z</updated>
     <generator>https://github.com/jpmonette/feed</generator>
     <link rel="alternate" href="https://alsowell.github.io/"/>
     <link rel="self" href="https://alsowell.github.io//atom.xml"/>
@@ -65,8 +65,8 @@
 <pre><code class="language-kotlin">Shell(true).exec(&quot;input tap xxx xxx&quot;)
 </code></pre>
 <p>  到此，我们已经解决了模拟点击的步骤。点击完成再去本地文件中看一下发现所属的账户信息已经写入成功了。同时在后台也发现了这台设备已经在线，可以愉快的连接上去搞事情啦。</p>
-<h3 id="总结">总结</h3>
-<p>  以上就是笔者面对这个需求从懵逼到最后实现的过程整个需求的实现过程。事后看来有很多没有按照Android开发规范来进行操作，如获取弹窗是直接dump出xml来进行解析而不是通过WindowManager来进行操作。但是想分享的是整个需求的实现思路。希望能对你有一点点帮助。</p>
+<h3 id="结语">结语</h3>
+<p>  以上就是笔者面对这个需求从懵逼到最后实现整个需求的过程。事后看来有很多没有按照Android开发规范来进行操作，如获取弹窗是直接dump出xml来进行解析而不是通过WindowManager来进行操作。但是想分享的是整个需求的实现思路。希望能对你有一点点帮助。</p>
 ]]></content>
     </entry>
     <entry>
