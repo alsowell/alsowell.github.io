@@ -2,7 +2,7 @@
 <feed xmlns="http://www.w3.org/2005/Atom">
     <id>https://alsowell.github.io/</id>
     <title>ALSOWELL`Blog</title>
-    <updated>2019-11-19T02:17:30.745Z</updated>
+    <updated>2019-11-19T02:27:40.716Z</updated>
     <generator>https://github.com/jpmonette/feed</generator>
     <link rel="alternate" href="https://alsowell.github.io/"/>
     <link rel="self" href="https://alsowell.github.io//atom.xml"/>
@@ -10,6 +10,131 @@
     <logo>https://alsowell.github.io//images/avatar.png</logo>
     <icon>https://alsowell.github.io//favicon.ico</icon>
     <rights>All rights reserved 2019, ALSOWELL`Blog</rights>
+    <entry>
+        <title type="html"><![CDATA[ 再学Android:okhttp3.X(二)Interceptor：BridgeInterceptor]]></title>
+        <id>https://alsowell.github.io//post/okhttp_two</id>
+        <link href="https://alsowell.github.io//post/okhttp_two">
+        </link>
+        <updated>2019-11-19T02:17:44.000Z</updated>
+        <content type="html"><![CDATA[<p>  大多数人说到okhttp优秀的地方基本上都会脱口而出通过设置拦截器可以很方便的实现网络请求的打印、添加一些公共参数等等。那么其内部究竟是怎么实现的呢？我们来探一探路：</p>
+<ul>
+<li>默认的拦截器<br>
+  其实okhttp内部是有五个默认的拦截器，如下图：<br>
+<img src="https://alsowell.github.io//post-images/1574066927603.jpg" alt="">
+<ul>
+<li>BridgeInterceptor</li>
+</ul>
+</li>
+</ul>
+<table><tr><td bgcolor=#f7f6f3>
+&emsp;&emsp;释义：应用层和网络层之间的桥接，首先往用户发起的请求中添加一部分网络层需要的参数，接着调用网络，最后从响应体中解析出用户请求的结果
+</td></tr></table>
+&emsp;&emsp;我们首先看一下拦截器会往请求中添加什么参数，为了阅读方便，将直接在代码中逐行分析。
+<pre><code class="language-kotlin">class BridgeInterceptor(private val cookieJar: CookieJar) : Interceptor {
+  @Throws(IOException::class)
+  override fun intercept(chain: Interceptor.Chain): Response {
+      //首先从请求调用链中获取到request，request我们前文有分析过
+    val userRequest = chain.request()
+    //通过newBuilder.build的方式重新构建一个request 至于为什么这么做。将在后续文章分析
+     val requestBuilder = userRequest.newBuilder()
+    //拿到请求的body体 基本上对应post请求类型
+    val body = userRequest.body
+    if (body != null) {
+      val contentType = body.contentType()
+      if (contentType != null) {
+          //将请求体类型 放入header  如application/json
+        requestBuilder.header(&quot;Content-Type&quot;, contentType.toString())
+      }
+        
+      val contentLength = body.contentLength()
+       //获取请求体的长度放入header
+       //Transfer-Encoding 字面意思也很好理解，即为传输过程中的编码格式
+       //根据网上资料:首部字段Transfer-Encoding规定了传输报文主体时采用的编码方式。HTTP
+       //1.1的传输编码方式仅对分块传输编码有效。值为 chunked 表示请求体的内容大小是未知的。       
+       //因此Transfer-Encoding与Content-Length两个首部不能共存。
+      if (contentLength != -1L) {
+        requestBuilder.header(&quot;Content-Length&quot;, contentLength.toString())
+             requestBuilder.removeHeader(&quot;Transfer-Encoding&quot;)
+      } else {
+        requestBuilder.header(&quot;Transfer-Encoding&quot;, &quot;chunked&quot;)
+        requestBuilder.removeHeader(&quot;Content-Length&quot;)
+      }
+    }
+    //Host即对应请求中的域名 对此HttpUrl中有详细的注释解释
+    //| URL                   | `host()`        |
+    //| :-------------------- | :-------------- |
+    //| `http://android.com/` | `&quot;android.com&quot;` |
+    //| `http://127.0.0.1/`   | `&quot;127.0.0.1&quot;`   |
+    //| `http://[::1]/`       | `&quot;::1&quot;`         |
+    //| `http://xn--n3h.net/` | `&quot;xn--n3h.net&quot;` |
+    //其中toHostHeader()方法会取到对应的域名并且拼接上默认的端口 http默认端口80 、https默认端口443
+    if (userRequest.header(&quot;Host&quot;) == null) {
+       requestBuilder.header(&quot;Host&quot;, userRequest.url.toHostHeader())
+    }
+    //指定连接模式为 Keep-Alive 这样就能方便的复用连接池
+    if (userRequest.header(&quot;Connection&quot;) == null) {
+      requestBuilder.header(&quot;Connection&quot;, &quot;Keep-Alive&quot;)
+    }
+
+    // If we add an &quot;Accept-Encoding: gzip&quot; header field we're responsible for also decompressing
+    // the transfer stream.
+    //如果设置的接收格式是gzip 那么响应结束时也会解码
+    var transparentGzip = false
+    if (userRequest.header(&quot;Accept-Encoding&quot;) == null &amp;&amp; userRequest.header(&quot;Range&quot;) == null) {
+      transparentGzip = true
+      
+      requestBuilder.header(&quot;Accept-Encoding&quot;, &quot;gzip&quot;)
+    }
+    //从request中取出cookie 并将它放入请求头中
+    val cookies = cookieJar.loadForRequest(userRequest.url)
+    if (cookies.isNotEmpty()) {
+      requestBuilder.header(&quot;Cookie&quot;, cookieHeader(cookies))
+    }
+    //请求头中放入 user-agent 如果是空 那么放入默认 agent:okhttp/x.x.x
+    if (userRequest.header(&quot;User-Agent&quot;) == null) {
+      requestBuilder.header(&quot;User-Agent&quot;, userAgent)
+    }
+    //这一步是拿到响应体 
+    val networkResponse = chain.proceed(requestBuilder.build())
+    //从header中解析出来cookie 如果存在那么就保存下来 
+       cookieJar.receiveHeaders(userRequest.url, networkResponse.headers)
+    val responseBuilder = networkResponse.newBuilder()
+        .request(userRequest)
+
+    //这步是做了判断 如果Content-Encoding是gzip类型，并且content-length &gt;0 
+    //取出body进行处理
+    if (transparentGzip &amp;&amp;
+        &quot;gzip&quot;.equals(networkResponse.header(&quot;Content-Encoding&quot;), ignoreCase = true) &amp;&amp;
+        networkResponse.promisesBody()) {
+      val responseBody = networkResponse.body
+      if (responseBody != null) {
+          //对请求响应体做一遍处理 因为响应体的body的传输格式是gzip类型 
+          //通过封装的方法类解析处理
+        val gzipSource = GzipSource(responseBody.source())
+        val strippedHeaders = networkResponse.headers.newBuilder()
+            .removeAll(&quot;Content-Encoding&quot;)
+            .removeAll(&quot;Content-Length&quot;)
+            .build()
+        responseBuilder.headers(strippedHeaders)
+        val contentType = networkResponse.header(&quot;Content-Type&quot;)
+        //解析成为用户真正可使用的body
+        responseBuilder.body(RealResponseBody(contentType, -1L, gzipSource.buffer()))
+      }
+    }
+
+    return responseBuilder.build()
+  }
+
+</code></pre>
+<p>  到此为止整个BridgeInterceptor就分析完成了，我们来做一下总结：</p>
+<ul>
+<li>对用户的请求做一遍处理，如果用户设置了参数使用用户配置，如果未设置那么就使用默认的。</li>
+<li>通过chain调用下一个拦截器</li>
+<li>对接口的请求做一遍处理，比如gzip、cookie 最后解析成用户真正可使用的body</li>
+</ul>
+<p>  由上可知，BridgeInterceptor其实是okhttp为了方便用户使用封装的一个拦截器，让用户少做了很多重复繁杂的工作。</p>
+]]></content>
+    </entry>
     <entry>
         <title type="html"><![CDATA[再学Android:okhttp3.X(一)Request&OkHttpClient]]></title>
         <id>https://alsowell.github.io//post/okhttp_one</id>
