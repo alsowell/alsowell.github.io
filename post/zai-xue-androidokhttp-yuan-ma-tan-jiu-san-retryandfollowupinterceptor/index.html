@@ -1,0 +1,464 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" >
+
+<title>再学Android:OkHttp源码探究(三) RetryAndFollowUpInterceptor | ALSOWELL`Blog</title>
+<meta name="description" content="Never Stop">
+
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+
+<link rel="stylesheet" href="https://use.fontawesome.com/releases/v5.7.2/css/all.css" integrity="sha384-fnmOCqbTlWIlj8LyTjo7mOUStjsKC4pOpQbqyi7RrhN7udi9RwhKkMHpvLbHG9Sr" crossorigin="anonymous">
+<link rel="shortcut icon" href="https://alsowell.github.io//favicon.ico?v=1574403495543">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.10.0/katex.min.css">
+<link rel="stylesheet" href="https://alsowell.github.io//styles/main.css">
+
+
+
+<script src="https://cdn.jsdelivr.net/npm/vue/dist/vue.js"></script>
+<script src="https://cdn.bootcss.com/highlight.js/9.12.0/highlight.min.js"></script>
+
+<link rel="stylesheet" href="https://unpkg.com/aos@next/dist/aos.css" />
+
+
+
+  </head>
+  <body>
+    <div id="app" class="main">
+
+      <div class="sidebar" :class="{ 'full-height': menuVisible }">
+  <div class="top-container" data-aos="fade-right">
+    <div class="top-header-container">
+      <a class="site-title-container" href="https://alsowell.github.io/">
+        <img src="https://alsowell.github.io//images/avatar.png?v=1574403495543" class="site-logo">
+        <h1 class="site-title">ALSOWELL`Blog</h1>
+      </a>
+      <div class="menu-btn" @click="menuVisible = !menuVisible">
+        <div class="line"></div>
+      </div>
+    </div>
+    <div>
+      
+        
+          <a href="/" class="site-nav">
+            首页
+          </a>
+        
+      
+        
+          <a href="/archives" class="site-nav">
+            归档
+          </a>
+        
+      
+        
+          <a href="/tags" class="site-nav">
+            标签
+          </a>
+        
+      
+        
+          <a href="/post/about" class="site-nav">
+            关于
+          </a>
+        
+      
+    </div>
+  </div>
+  <div class="bottom-container" data-aos="flip-up" data-aos-offset="0">
+    <div class="social-container">
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    </div>
+    <div class="site-description">
+      Never Stop
+    </div>
+    <div class="site-footer">
+      Powered by <a href="https://github.com/getgridea/gridea" target="_blank">Gridea</a> | <a class="rss" href="https://alsowell.github.io//atom.xml" target="_blank">RSS</a>
+    </div>
+  </div>
+</div>
+
+
+      <div class="main-container">
+        <div class="content-container" data-aos="fade-up">
+          <div class="post-detail">
+            <h2 class="post-title">再学Android:OkHttp源码探究(三) RetryAndFollowUpInterceptor</h2>
+            <div class="post-date">2019-11-21</div>
+            
+            <div class="post-content">
+              <h4 id="前言">前言</h4>
+<p>前面的文章我们分析了整个okhttp的核心其实是getResponseWithInterceptor方法。内部是通过一系列的拦截器调用来完成整个网络请求。我们也知道了ok内部定义了五个拦截器。拦截器又是通过责任链模式来递归进行调用。本篇文章我们将按照加载顺序来分析第一个拦截器<strong>RetryAndFollowUpInterceptor</strong></p>
+<p>####介绍</p>
+<p>按照字面意思来理解就是一个管理重试和后续动作的拦截器，那么究竟是怎么做的呢？简单，上注释！</p>
+<pre><code class="language-kotlin">//这个拦截器主要是用来处理失败和重定向的请求，如果请求被取消可能会抛出io异常 
+/**
+ * This interceptor recovers from failures and follows redirects as necessary. It may throw an
+ * [IOException] if the call was canceled.
+ */
+</code></pre>
+<p>看来前面的理解也没有问题，规范的命名确实能让人一看就知道什么意思。那直接进入正文。</p>
+<h4 id="核心功能">核心功能</h4>
+<ul>
+<li>
+<p>失败重试</p>
+<ul>
+<li>在遇到RouteException和IOException通过recover()方法判断当前请求是否可以重新尝试。</li>
+</ul>
+</li>
+<li>
+<p>继续发起请求</p>
+<ul>
+<li>
+<p>通过followUpRequest()方法来判断当前是否可以继续发起请求，主要根据响应码来判断</p>
+<table>
+<thead>
+<tr>
+<th>应码</th>
+<th>说明</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>07</td>
+<td>代理鉴权失败、调用 Authenticator 进行授权后继续发起新的请求</td>
+</tr>
+<tr>
+<td>01</td>
+<td>鉴权失败、调用 Authenticator 进行授权后继续发起新的请求</td>
+</tr>
+<tr>
+<td>07、308</td>
+<td>重定向，method不为get 和head情况下 ，重新发起新的请求</td>
+</tr>
+<tr>
+<td>00、301、302、303</td>
+<td>重定向，重新发起新的请求</td>
+</tr>
+<tr>
+<td>08</td>
+<td>客户端请求超时，会继续发起新的请求</td>
+</tr>
+<tr>
+<td>03</td>
+<td>服务不可用，会继续发起新的请求</td>
+</tr>
+<tr>
+<td>lse</td>
+<td>直接发起新的请求</td>
+</tr>
+</tbody>
+</table>
+<ul>
+<li>注意：请求重试次数是受到MAX_FOLLOW_UPS 限制的，默认是20</li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+<p>经过前面文章的分析我们知道每一个拦截器都是在intercept里面操作的，那我们直接来分析一下：</p>
+<pre><code class="language-kotlin">@Throws(IOException::class)
+  override fun intercept(chain: Interceptor.Chain): Response {
+    var request = chain.request()
+    //1
+    val realChain = chain as RealInterceptorChain
+    val transmitter = realChain.transmitter()
+    var followUpCount = 0
+    var priorResponse: Response? = null
+    while (true) {
+      //2
+      transmitter.prepareToConnect(request)
+      if (transmitter.isCanceled) {
+        throw IOException(&quot;Canceled&quot;)
+      }
+      var response: Response
+      var success = false
+      try {
+        //3
+        response = realChain.proceed(request, transmitter, null)
+        success = true
+      } catch (e: RouteException) {
+        // The attempt to connect via a route failed. The request will not have been sent.
+        if (!recover(e.lastConnectException, transmitter, false, request)) {
+          throw e.firstConnectException
+        }
+        continue
+        //4
+      } catch (e: IOException) {
+        // An attempt to communicate with a server failed. The request may have been sent.
+        val requestSendStarted = e !is ConnectionShutdownException
+        if (!recover(e, transmitter, requestSendStarted, request)) throw e
+        continue
+      } finally {
+        // The network call threw an exception. Release any resources.
+        if (!success) {
+          transmitter.exchangeDoneDueToException()
+        }
+      }
+      // Attach the prior response if it exists. Such responses never have a body.
+      if (priorResponse != null) {
+        response = response.newBuilder()
+            .priorResponse(priorResponse.newBuilder()
+                .body(null)
+                .build())
+            .build()
+      }
+      val exchange = response.exchange
+      val route = exchange?.connection()?.route()
+      //5
+      val followUp = followUpRequest(response, route)
+      if (followUp == null) {
+        if (exchange != null &amp;&amp; exchange.isDuplex) {
+          transmitter.timeoutEarlyExit()
+        }
+        return response
+      }
+      val followUpBody = followUp.body
+      //6
+      if (followUpBody != null &amp;&amp; followUpBody.isOneShot()) {
+        return response
+      }
+      response.body?.closeQuietly()
+      if (transmitter.hasExchange()) {
+        exchange?.detachWithViolence()
+      }
+      //7
+      if (++followUpCount &gt; MAX_FOLLOW_UPS) {
+        throw ProtocolException(&quot;Too many follow-up requests: $followUpCount&quot;)
+      }
+      request = followUp
+      priorResponse = response
+    }
+  }
+</code></pre>
+<h4 id="主要步骤">主要步骤</h4>
+<ul>
+<li>
+<p>在上一篇文章中我们分析过，拦截器会通过构造RealInterceptorChain对象，并且把其作为参数通过调用当前interceptor的intercept方法来进行递归调用。并且也知道可以通过chain来获取到request、connection等对象。同样在重试拦截器中也是一样。第一步首先是拿到request 、realChain、transmitter对象。</p>
+</li>
+<li>
+<p>进入到while循环中，首先调用transmitter的prepareToConnect方法。我们跟进去看一下：</p>
+<pre><code class="language-kotlin">fun prepareToConnect(request: Request) {
+    if (this.request != null) {
+      if (this.request!!.url.canReuseConnectionFor(request.url) &amp;&amp; exchangeFinder!!.hasRouteToTry()) {
+        return // Already ready.
+      }
+      check(exchange == null)
+      if (exchangeFinder != null) {
+        maybeReleaseConnection(null, true)
+        exchangeFinder = null
+      }
+    }
+    this.request = request
+    this.exchangeFinder = ExchangeFinder(
+        this, connectionPool, createAddress(request.url), call, eventListener)
+  }
+</code></pre>
+<ul>
+<li>不是第一次进入这个方法的时候
+<ul>
+<li>首先会判断是否可以服用连接池并且仍然处于重试过程中。</li>
+<li>如果exchangeFinder不为空情况下 尝试关闭连接。并且回调eventListener connectionReleased方法，接着根据请求是否失败回调callFailed或者callEnd</li>
+</ul>
+</li>
+<li>首次进入情况下
+<ul>
+<li>构建出exchangeFinder对象，为后续的网络连接做准备</li>
+</ul>
+</li>
+</ul>
+</li>
+<li>
+<p>判断请求是否被取消，如果取消抛出异常。</p>
+<ul>
+<li>
+<pre><code class="language-kotlin">  fun cancel() {
+    val exchangeToCancel: Exchange?
+    val connectionToCancel: RealConnection?
+    synchronized(connectionPool) {
+      canceled = true
+      exchangeToCancel = exchange
+      connectionToCancel = exchangeFinder?.connectingConnection() ?: connection
+    }
+    exchangeToCancel?.cancel() ?: connectionToCancel?.cancel()
+  }
+</code></pre>
+</li>
+</ul>
+<p>通过调用链我们可以发现，这个方法只会在应用层通过Call对象的cancel方法调用到。</p>
+</li>
+<li>
+<p>调用realChain的proceed方法</p>
+<ul>
+<li>
+<p>还记得我们在上一篇文章中分析过这个方法其实是递归调用后续的拦截器并且将下一级的结果返回到当前处理。</p>
+</li>
+<li>
+<p>通过try-catch 捕获在网络请求过程中可能出现的异常，如果未发生异常success为true，反之为false。</p>
+<ul>
+<li>
+<p>RouteException</p>
+<ul>
+<li>异常发生在请求还没发出之前，追溯源码会发现其实是发生在connect过程中。</li>
+</ul>
+</li>
+<li>
+<p>IOException</p>
+<ul>
+<li>异常发生请求可能已经发出，并且在读取服务端的响应过程中出错。</li>
+</ul>
+</li>
+<li>
+<p>通过recover方法判断是否是值得重试的异常，判断依据如下：</p>
+<pre><code class="language-kotlin"> private fun recover(
+    e: IOException,
+    transmitter: Transmitter,
+    requestSendStarted: Boolean,
+    userRequest: Request
+  ): Boolean {
+    // The application layer has forbidden retries.
+    if (!client.retryOnConnectionFailure) return false
+    // We can't send the request body again.
+    if (requestSendStarted &amp;&amp; requestIsOneShot(e, userRequest)) return false
+    // This exception is fatal.
+    if (!isRecoverable(e, requestSendStarted)) return false
+    // No more routes to attempt.
+    if (!transmitter.canRetry()) return false
+    // For failure recovery, use the same route selector with a new connection.
+    return true
+  }
+</code></pre>
+<ul>
+<li>
+<p>应用层设置失败是否重试</p>
+<figure data-type="image" tabindex="1"><img src="/Users/mc/Desktop/%E6%96%87%E7%AB%A0%E5%9B%BE%E7%89%87/WechatIMG133355.tiff" alt=""></figure>
+</li>
+<li>
+<p>是否有相同的请求正在执行</p>
+</li>
+<li>
+<p>是否是可恢复的异常</p>
+</li>
+<li>
+<pre><code class="language-kotlin">private fun isRecoverable(e: IOException, requestSendStarted: Boolean): Boolean {
+    if (e is ProtocolException) {
+      return false
+    }
+    if (e is InterruptedIOException) {
+      return e is SocketTimeoutException &amp;&amp; !requestSendStarted
+    }
+    if (e is SSLHandshakeException) {
+      if (e.cause is CertificateException) {
+        return false
+      }
+    }
+    if (e is SSLPeerUnverifiedException) {
+      return false
+    }
+    return true
+  }
+</code></pre>
+<ul>
+<li>
+<p>ProtocolException 协议异常</p>
+<p><img src="/Users/mc/Desktop/%E6%96%87%E7%AB%A0%E5%9B%BE%E7%89%87/1574337835415.jpg" alt="">主要发生在 RealConnection 中创建 HTTPS 通过 HTTP 代理进行连接重试超过 21 次。</p>
+</li>
+</ul>
+</li>
+<li>
+<p>InterruptedIOException</p>
+<ul>
+<li>io终端异常，但是如果当前是一个连接超时异常，会进入到后续的判断，即根据响应码判断是否可重试。</li>
+</ul>
+</li>
+<li>
+<p>SSLHandshakeException</p>
+<ul>
+<li>https握手失败异常，不可重试。</li>
+</ul>
+</li>
+<li>
+<p>SSLPeerUnverifiedException</p>
+<ul>
+<li>网站的证书是不可信任的异常，不可重试</li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+</li>
+<li>
+<p>是否已经失败过并且具有可以重试的route</p>
+</li>
+<li>
+<p>如果请求未成功那么释放在上一次请求过程中的所有资源</p>
+</li>
+<li>
+<p>从response中获取到 exchange、route对象。</p>
+</li>
+<li>
+<p>调用followUpRequest方法 根据上次请求的返回码来确定是否需要重新尝试，关于响应码的分析在文章开头已经介绍过。</p>
+</li>
+<li>
+<p>自增记录重试次数并且判断是否超过默认值</p>
+</li>
+</ul>
+<h4 id="总结">总结</h4>
+<p>经过上面的分析我们可以知道：重试拦截器其实内部的逻辑还是有点小复杂的，首先定义了每个请求的最大默认尝试次数。然后在请求没有获取到响应时通过异常类型来判断是否可以继续重试。在获取到响应体阶段则是通过状态吗来判断。这里是不是更好理解：okhttp每个拦截器都是分为了Request阶段和Response阶段。到这里，我们对RetryAndFollowUpInterceptor的分析就告一段落了，下一章将会分析BridgeInterceptor。</p>
+<h4 id="参考资料">参考资料</h4>
+<p><a href="https://juejin.im/post/5aa23fa46fb9a028cb2d3a96">源码分析三：OkHttp—RetryAndFollowUpInterceptor</a></p>
+
+            </div>
+            
+            
+              <div class="next-post">
+                <div class="next">下一篇</div>
+                <a href="https://alsowell.github.io//post/zai-xue-androidokhttp-yuan-ma-tan-jiu-er-getresponsewithinterceptorchain">
+                  <h3 class="post-title">
+                    再学Android:OkHttp源码探究(二)getResponseWithInterceptorChain
+                  </h3>
+                </a>
+              </div>
+            
+
+            
+
+          </div>
+
+        </div>
+      </div>
+    </div>
+
+    <script src="https://unpkg.com/aos@next/dist/aos.js"></script>
+
+<script type="application/javascript">
+
+AOS.init();
+
+hljs.initHighlightingOnLoad()
+
+var app = new Vue({
+  el: '#app',
+  data: {
+    menuVisible: false,
+  },
+})
+
+</script>
+
+
+
+
+  </body>
+</html>

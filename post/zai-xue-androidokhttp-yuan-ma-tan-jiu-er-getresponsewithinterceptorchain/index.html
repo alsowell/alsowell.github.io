@@ -1,0 +1,336 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" >
+
+<title>再学Android:OkHttp源码探究(二)getResponseWithInterceptorChain | ALSOWELL`Blog</title>
+<meta name="description" content="Never Stop">
+
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+
+<link rel="stylesheet" href="https://use.fontawesome.com/releases/v5.7.2/css/all.css" integrity="sha384-fnmOCqbTlWIlj8LyTjo7mOUStjsKC4pOpQbqyi7RrhN7udi9RwhKkMHpvLbHG9Sr" crossorigin="anonymous">
+<link rel="shortcut icon" href="https://alsowell.github.io//favicon.ico?v=1574403495543">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.10.0/katex.min.css">
+<link rel="stylesheet" href="https://alsowell.github.io//styles/main.css">
+
+
+
+<script src="https://cdn.jsdelivr.net/npm/vue/dist/vue.js"></script>
+<script src="https://cdn.bootcss.com/highlight.js/9.12.0/highlight.min.js"></script>
+
+<link rel="stylesheet" href="https://unpkg.com/aos@next/dist/aos.css" />
+
+
+
+  </head>
+  <body>
+    <div id="app" class="main">
+
+      <div class="sidebar" :class="{ 'full-height': menuVisible }">
+  <div class="top-container" data-aos="fade-right">
+    <div class="top-header-container">
+      <a class="site-title-container" href="https://alsowell.github.io/">
+        <img src="https://alsowell.github.io//images/avatar.png?v=1574403495543" class="site-logo">
+        <h1 class="site-title">ALSOWELL`Blog</h1>
+      </a>
+      <div class="menu-btn" @click="menuVisible = !menuVisible">
+        <div class="line"></div>
+      </div>
+    </div>
+    <div>
+      
+        
+          <a href="/" class="site-nav">
+            首页
+          </a>
+        
+      
+        
+          <a href="/archives" class="site-nav">
+            归档
+          </a>
+        
+      
+        
+          <a href="/tags" class="site-nav">
+            标签
+          </a>
+        
+      
+        
+          <a href="/post/about" class="site-nav">
+            关于
+          </a>
+        
+      
+    </div>
+  </div>
+  <div class="bottom-container" data-aos="flip-up" data-aos-offset="0">
+    <div class="social-container">
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    </div>
+    <div class="site-description">
+      Never Stop
+    </div>
+    <div class="site-footer">
+      Powered by <a href="https://github.com/getgridea/gridea" target="_blank">Gridea</a> | <a class="rss" href="https://alsowell.github.io//atom.xml" target="_blank">RSS</a>
+    </div>
+  </div>
+</div>
+
+
+      <div class="main-container">
+        <div class="content-container" data-aos="fade-up">
+          <div class="post-detail">
+            <h2 class="post-title">再学Android:OkHttp源码探究(二)getResponseWithInterceptorChain</h2>
+            <div class="post-date">2019-11-21</div>
+            
+            <div class="post-content">
+              <h4 id="前言">前言</h4>
+<p>上一篇文章中我们简单的总结了ok发起请求并接收响应的整个流程，我们发现关键步骤是getResponseWithInterceptorChain这个方法。那这里面又做了什么事情呢？还是首先来看一下代码：</p>
+<pre><code class="language-kotlin"> @Throws(IOException::class)
+  fun getResponseWithInterceptorChain(): Response {
+    // Build a full stack of interceptors.
+    val interceptors = mutableListOf&lt;Interceptor&gt;()
+    interceptors += client.interceptors
+    interceptors += RetryAndFollowUpInterceptor(client)
+    interceptors += BridgeInterceptor(client.cookieJar)
+    interceptors += CacheInterceptor(client.cache)
+    interceptors += ConnectInterceptor
+    if (!forWebSocket) {
+      interceptors += client.networkInterceptors
+    }
+    interceptors += CallServerInterceptor(forWebSocket)
+
+    val chain = RealInterceptorChain(interceptors, transmitter, null, 0, originalRequest, this,
+        client.connectTimeoutMillis, client.readTimeoutMillis, client.writeTimeoutMillis)
+
+    var calledNoMoreExchanges = false
+    try {
+      val response = chain.proceed(originalRequest)
+      if (transmitter.isCanceled) {
+        response.closeQuietly()
+        throw IOException(&quot;Canceled&quot;)
+      }
+      return response
+    } catch (e: IOException) {
+      calledNoMoreExchanges = true
+      throw transmitter.noMoreExchanges(e) as Throwable
+    } finally {
+      if (!calledNoMoreExchanges) {
+        transmitter.noMoreExchanges(null)
+      }
+    }
+  }
+</code></pre>
+<p>可以说这个方法是整个okhttp的核心，通过这么几行代码就实现了整个请求的过程。这里不得不提到ok的拦截器机制。大多数人说到okhttp优秀的地方基本上都会脱口而出通过设置拦截器可以很方便的实现网络请求的打印、添加一些公共参数等等。而拦截器真正的运行其实就是在这个方法中。</p>
+<ul>
+<li>首先在interceptors中添加用户自定义的拦截器</li>
+<li>然后按顺序添加各种系统内置的拦截器</li>
+<li>通过RealInterceptorChain方法获取一个chain对象</li>
+<li>通过chain.proceed获取response</li>
+</ul>
+<h4 id="拦截器">拦截器</h4>
+<p>说了这么久的拦截器，肯定会好奇它究竟是个什么妖魔鬼怪：</p>
+<pre><code class="language-kotlin">/**
+ * Observes, modifies, and potentially short-circuits requests going out and the corresponding
+ * responses coming back in. Typically interceptors add, remove, or transform headers on the request
+ * or response.
+ */
+interface Interceptor {
+  @Throws(IOException::class)
+  fun intercept(chain: Chain): Response
+
+  companion object {
+    inline operator fun invoke(crossinline block: (chain: Chain) -&gt; Response): Interceptor =
+        object : Interceptor {
+          override fun intercept(chain: Chain) = block(chain)
+        }
+  }
+  interface Chain {
+    fun request(): Request
+
+    @Throws(IOException::class)
+    fun proceed(request: Request): Response
+    fun connection(): Connection?
+    fun call(): Call
+    fun connectTimeoutMillis(): Int
+    fun withConnectTimeout(timeout: Int, unit: TimeUnit): Chain
+    fun readTimeoutMillis(): Int
+    fun withReadTimeout(timeout: Int, unit: TimeUnit): Chain
+    fun writeTimeoutMillis(): Int
+    fun withWriteTimeout(timeout: Int, unit: TimeUnit): Chain
+  }
+}
+
+</code></pre>
+<p>Interceptor实际上是一个接口，里面定义了一个intercept方法和chain的接口类。</p>
+<h5 id="intercept">intercept</h5>
+<p>关于intercept方法是不是很熟悉？我们在自定义拦截器的时候往往都是在这里面做一些瞎操作。</p>
+<pre><code class="language-kotlin">   override fun intercept(chain: Interceptor.Chain): Response {
+        val request = chain.request()
+        val realInterceptorChain = chain as RealInterceptorChain
+        val transmitter = realInterceptorChain.transmitter()
+        val response = realInterceptorChain.proceed(request, transmitter, null)
+        return response
+
+    }
+</code></pre>
+<ul>
+<li>这里首先是通过chain.request获取请求的request对象</li>
+<li>通过chain.proceed 递归调用下一个拦截器的intercept方法</li>
+<li>最终返回chain.proceed的response到上一级拦截器</li>
+</ul>
+<h5 id="分层">分层</h5>
+<p>这里其实是将每个拦截器分为了两个阶段：</p>
+<ul>
+<li>Request阶段：执行该拦截器在请求前做的事，例如：bridgeInterceptor添加一些请求参数</li>
+<li>Response阶段：执行拦截器在获取响应之后做的事，例如：打印出请求体的返回</li>
+</ul>
+<p>拦截器的设计其实是采用了递归调用的思想，仔细想想其实是非常巧妙的，这样可以保证不论是系统内置还是用户自定义的拦截器都可以得到最终执行。如果在某个拦截器中出现了错误，还可以把错误抛给上一层来处理。</p>
+<h5 id="内置拦截器">内置拦截器</h5>
+<p>通过剖析源码我们会发现,ok内部其实是帮我们内置了好几种拦截器，每次请求都会添加进去，我们按照添加顺序整理如下：</p>
+<table>
+<thead>
+<tr>
+<th style="text-align:center">拦截器</th>
+<th style="text-align:center">说明</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align:center">RetryAndFollowUpInterceptor</td>
+<td style="text-align:center">负责实现重定向功能</td>
+</tr>
+<tr>
+<td style="text-align:center">BridgeInterceptor</td>
+<td style="text-align:center">将用户构造的请求转换为向服务器发送的请求，将服务器返回的响应转换为对用户友好的响应</td>
+</tr>
+<tr>
+<td style="text-align:center">CacheInterceptor</td>
+<td style="text-align:center">读取缓存、更新缓存</td>
+</tr>
+<tr>
+<td style="text-align:center">ConnectInterceptor</td>
+<td style="text-align:center">建立与服务器的连接</td>
+</tr>
+<tr>
+<td style="text-align:center">CallServerInterceptor</td>
+<td style="text-align:center">从服务器读取响应</td>
+</tr>
+</tbody>
+</table>
+<p>可以看出，整个网络请求的过程是通过各个拦截器相互配合来实现，假如我们在网络请求过程中设置允许缓存，那么在请求网络之前会预先获取缓存，然后再去跟服务器建立连接。通过拦截器的机制，我们可以很方便的控制整个网络请求的过程以及添加我们自己的拓展。</p>
+<p>整个网络请求过程中，用户其实是可以添加两种不同类型的拦截器的。</p>
+<ul>
+<li>通过 addInterceptor()在网络请求前后添加拦截器</li>
+<li>通过networkInterceptors()在获取响应前后添加拦截器</li>
+</ul>
+<p>这一点在getResponseWithInterceptorChain（）方法中添加拦截器的顺序是可以分析出来的。</p>
+<h5 id="整体流程">整体流程</h5>
+<p><img src="https://user-gold-cdn.xitu.io/2019/11/21/16e8bf6522fc07a5?w=1064&amp;h=1004&amp;f=jpeg&amp;s=89681" alt=""><br>
+图片来源:https://blog.n0texpecterr0r.cn/?p=717</p>
+<h4 id="realinterceptorchain">RealInterceptorChain</h4>
+<p>经过上面的分析我们知道okhttp的实际请求和响应过程是通过一个个拦截器的递归调用来实现的。主要方法就是</p>
+<p>realInterceptorChain.proceed。我们先来看一下RealInterceptorChain的构造方法</p>
+<pre><code class="language-kotlin">class RealInterceptorChain(
+  private val interceptors: List&lt;Interceptor&gt;,
+  private val transmitter: Transmitter,
+  private val exchange: Exchange?,
+  private val index: Int,
+  private val request: Request,
+  private val call: Call,
+  private val connectTimeout: Int,
+  private val readTimeout: Int,
+  private val writeTimeout: Int
+) 
+</code></pre>
+<p>这里其实是将上一个拦截器的一些参数传递进来并且赋值的简单实现。包括所有的拦截器、以及我们在第一篇文章提到的transmitter等。整个类中最关键的还是proceed方法</p>
+<pre><code class="language-kotlin">  @Throws(IOException::class)
+  fun proceed(request: Request, transmitter: Transmitter, exchange: Exchange?): Response {
+    if (index &gt;= interceptors.size) throw AssertionError()
+    calls++
+    // If we already have a stream, confirm that the incoming request will use it.
+    check(this.exchange == null || this.exchange.connection()!!.supportsUrl(request.url)) {
+      &quot;network interceptor ${interceptors[index - 1]} must retain the same host and port&quot;
+    }
+    // If we already have a stream, confirm that this is the only call to chain.proceed().
+    check(this.exchange == null || calls &lt;= 1) {
+      &quot;network interceptor ${interceptors[index - 1]} must call proceed() exactly once&quot;
+    }
+    // Call the next interceptor in the chain.
+    val next = RealInterceptorChain(interceptors, transmitter, exchange,
+        index + 1, request, call, connectTimeout, readTimeout, writeTimeout)
+    val interceptor = interceptors[index]
+    @Suppress(&quot;USELESS_ELVIS&quot;)
+    val response = interceptor.intercept(next) ?: throw NullPointerException(
+        &quot;interceptor $interceptor returned null&quot;)
+    // Confirm that the next interceptor made its required call to chain.proceed().
+    check(exchange == null || index + 1 &gt;= interceptors.size || next.calls == 1) {
+      &quot;network interceptor $interceptor must call proceed() exactly once&quot;
+    }
+    check(response.body != null) { &quot;interceptor $interceptor returned a response with no body&quot; }
+    return response
+  }
+</code></pre>
+<p>可以看到这个方法中除了大量的判读逻辑，比较关键的就是通过index+1取到下一个RealInterceptorChain对象 。</p>
+<p>然后获取当前的拦截器并且调用其intercept方法 ，方法参数中传入了下一个拦截器的对应的chain。就是这样通过递归调用的设计，实现了由上而下，再由下而上实现了递与归的过程。从而非常漂亮的实现了http请求的全链路。</p>
+<p>看到这里有没有觉得这种设计模式很熟悉，没错就是责任链模式。这种设计模式在一个流程会有多种操作的业务场景下会非常实用。</p>
+<h4 id="总结">总结</h4>
+<p>本篇文章我们主要是分析了整个网络请求过程中非常重要的getResponseWithInterceptorChain()方法，内部通过责任链的模式递归调用用户自定义拦截器和内置拦截器来完成整个网络请求。通过对整个方法的分析，我们会更清晰的知道ok内部是怎么实现通过设置拦截器来完成我们想要的功能的。同时也是我们学习责任链模式非常好的实践。后续文章将逐个分析ok内置拦截器的具体作用。</p>
+<h2 id="参考资料">参考资料</h2>
+<p><a href="https://blog.n0texpecterr0r.cn/?p=717">OkHttp 源码剖析系列（一）——请求的发起及拦截器机制概述</a></p>
+
+            </div>
+            
+            
+              <div class="next-post">
+                <div class="next">下一篇</div>
+                <a href="https://alsowell.github.io//post/zai-xue-androidokhttp-yuan-ma-tan-jiu-yi-liu-cheng-gai-shu">
+                  <h3 class="post-title">
+                    再学Android:OkHttp源码探究(一)流程概述
+                  </h3>
+                </a>
+              </div>
+            
+
+            
+
+          </div>
+
+        </div>
+      </div>
+    </div>
+
+    <script src="https://unpkg.com/aos@next/dist/aos.js"></script>
+
+<script type="application/javascript">
+
+AOS.init();
+
+hljs.initHighlightingOnLoad()
+
+var app = new Vue({
+  el: '#app',
+  data: {
+    menuVisible: false,
+  },
+})
+
+</script>
+
+
+
+
+  </body>
+</html>

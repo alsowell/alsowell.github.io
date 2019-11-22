@@ -1,0 +1,474 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" >
+
+<title>再学Android:OkHttp源码探究(一)流程概述 | ALSOWELL`Blog</title>
+<meta name="description" content="Never Stop">
+
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+
+<link rel="stylesheet" href="https://use.fontawesome.com/releases/v5.7.2/css/all.css" integrity="sha384-fnmOCqbTlWIlj8LyTjo7mOUStjsKC4pOpQbqyi7RrhN7udi9RwhKkMHpvLbHG9Sr" crossorigin="anonymous">
+<link rel="shortcut icon" href="https://alsowell.github.io//favicon.ico?v=1574403495543">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.10.0/katex.min.css">
+<link rel="stylesheet" href="https://alsowell.github.io//styles/main.css">
+
+
+
+<script src="https://cdn.jsdelivr.net/npm/vue/dist/vue.js"></script>
+<script src="https://cdn.bootcss.com/highlight.js/9.12.0/highlight.min.js"></script>
+
+<link rel="stylesheet" href="https://unpkg.com/aos@next/dist/aos.css" />
+
+
+
+  </head>
+  <body>
+    <div id="app" class="main">
+
+      <div class="sidebar" :class="{ 'full-height': menuVisible }">
+  <div class="top-container" data-aos="fade-right">
+    <div class="top-header-container">
+      <a class="site-title-container" href="https://alsowell.github.io/">
+        <img src="https://alsowell.github.io//images/avatar.png?v=1574403495543" class="site-logo">
+        <h1 class="site-title">ALSOWELL`Blog</h1>
+      </a>
+      <div class="menu-btn" @click="menuVisible = !menuVisible">
+        <div class="line"></div>
+      </div>
+    </div>
+    <div>
+      
+        
+          <a href="/" class="site-nav">
+            首页
+          </a>
+        
+      
+        
+          <a href="/archives" class="site-nav">
+            归档
+          </a>
+        
+      
+        
+          <a href="/tags" class="site-nav">
+            标签
+          </a>
+        
+      
+        
+          <a href="/post/about" class="site-nav">
+            关于
+          </a>
+        
+      
+    </div>
+  </div>
+  <div class="bottom-container" data-aos="flip-up" data-aos-offset="0">
+    <div class="social-container">
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    </div>
+    <div class="site-description">
+      Never Stop
+    </div>
+    <div class="site-footer">
+      Powered by <a href="https://github.com/getgridea/gridea" target="_blank">Gridea</a> | <a class="rss" href="https://alsowell.github.io//atom.xml" target="_blank">RSS</a>
+    </div>
+  </div>
+</div>
+
+
+      <div class="main-container">
+        <div class="content-container" data-aos="fade-up">
+          <div class="post-detail">
+            <h2 class="post-title">再学Android:OkHttp源码探究(一)流程概述</h2>
+            <div class="post-date">2019-11-21</div>
+            
+            <div class="post-content">
+              <h4 id="写在前面">写在前面</h4>
+<p>本人从事Android开发工作几年，也算是见证了Android的技术变革。拿网络库来讲从最开始使用的xUtils到 <a href="https://github.com/google/volley">volley</a>然后到现在主流的<a href="https://github.com/square/okhttp">okhttp</a>。更不要说热更新、插件化、以及路由开发模式的大行其道。有感于工作中大多时候是仅限于使用,于是打算写一系列关于Android开发中使用到的框架解析，也算是对自己理解的一个记录。</p>
+<h4 id="正文">正文</h4>
+<p>网上看到一个观点：当我们想深入了解一个框架的时候，第一步是要会用，然后按照框架的流程图一步一步的去慢慢的探索分析。对于这个观点笔者是非常赞同的，优秀的框架都是有清晰的架构、核心思想也都采用了优秀的设计模式。下面我们从okhttp开始分析</p>
+<ul>
+<li>本系列文章基于okhttp4.2.2 (官方已使用kotlin进行重写)</li>
+</ul>
+<h3 id="发起一次简单的请求">发起一次简单的请求</h3>
+<p>任何框架的学习第一步都是从会用开始，下面我们开始使用OKHTTP构建一个简单的访问百度的请求。</p>
+<pre><code class="language-kotlin">   private fun makeCall() {
+        val okHttpClient = OkHttpClient.Builder()
+            .connectTimeout(10, TimeUnit.SECONDS)
+            .writeTimeout(10, TimeUnit.SECONDS)
+            .readTimeout(10, TimeUnit.SECONDS)
+            .build()
+        val request = Request.Builder()
+            .url(&quot;http://www.baidu.com&quot;)
+            .get()
+            .build()
+        okHttpClient.newCall(request).enqueue(object : Callback {
+            override fun onFailure(call: Call, e: IOException) {
+            }
+
+            override fun onResponse(call: Call, response: Response) {
+            }
+        })
+
+    }
+</code></pre>
+<p>可以看到我们首先构造一个okhttpClient出来并设置一些超时时间、通过request设置请求的域名和请求方法。最后通过enqueue异步、或者excute同步的方式去进行请求。请求结果会通过接口回调的方式返回。</p>
+<h4 id="okhttpclient">OkHttpClient</h4>
+<p>字面意思非常好理解，okhttp的客户端。首先来看一下client的类注释。大概意思如下:</p>
+<table><tr><td >
+使用的时候最好构建一个单例的client去复用到所有的网络请求，因为每个client都会持有它自己的连接池和线程池。复用连接池可以减少延迟并且可以减少内存的消耗，同时通过newBuilder()方法构造出来的client可以很方便的共享一些配置如：connectTimeOut等
+<br></br>
+Tips:看到上面的注释，网络优化角度为什么要复用连接池也就可以很明白的理解了。
+<td><tr></table>
+<p>okhttpclient是通过建造者模式构造出来，上面的示例我们发现真正在使用的时候需要我们设置的项并不多，但其实client在构造的时候是有很多参数可以设置。</p>
+<pre><code class="language-kotlin">    //异步请求什么时候执行的策略管理器
+    internal var dispatcher: Dispatcher = Dispatcher()
+    //管理http请求的连接来降低网络延迟的类
+    internal var connectionPool: ConnectionPool = ConnectionPool()
+    //一个网络请求拦截器
+    internal val interceptors: MutableList&lt;Interceptor&gt; = mutableListOf()
+    //网络部分拦截器
+    internal val networkInterceptors: MutableList&lt;Interceptor&gt; = mutableListOf()
+    //整个网络流程的监听器、我们可以通过设置整个监听来感知网络请求的质量、响应体大小以及持续时长等等。
+    internal var eventListenerFactory: EventListener.Factory =      EventListener.NONE.asFactory()
+    //连接失败时候是否重试
+    internal var retryOnConnectionFailure = true
+    //暂时没看懂是干嘛的，默认值是不添加，日常开发中也不会用到
+    internal var authenticator: Authenticator = Authenticator.NONE
+    //是否可以重定向
+    internal var followRedirects = true
+    //ssl是否可以重定向
+    internal var followSslRedirects = true
+    //这个字面意思理解就可以了 一般在请求中需要加入用户的token的时候会用到 默认是没有cookie
+    internal var cookieJar: CookieJar = CookieJar.NO_COOKIES
+    //网络请求的缓存策略
+    internal var cache: Cache? = null
+    //dns 一个网络请求过程中 会首先把域名解析成ip 这样客户端才知道往什么地址发起请求。
+    internal var dns: Dns = Dns.SYSTEM
+    //设置代理 
+    internal var proxy: Proxy? = null
+    //代理选择器 
+    internal var proxySelector: ProxySelector? = null
+    //跟上面一样  属于代理ip的一个属性
+    internal var proxyAuthenticator: Authenticator = Authenticator.NONE
+    //socket 工厂 
+    internal var socketFactory: SocketFactory = SocketFactory.getDefault()
+    //https 的socket 
+    internal var sslSocketFactoryOrNull: SSLSocketFactory? = null
+    //证书信任管理器，一般为了防止https 握手失败我们会设置信任所有的证书
+    internal var x509TrustManagerOrNull: X509TrustManager? = null
+    //连接说明 指定socket连接时的一些配置 如：https还是http或者TLS的版本、密码来保证安全的连接
+    internal var connectionSpecs: List&lt;ConnectionSpec&gt; = DEFAULT_CONNECTION_SPECS
+    //连接时选择的协议 HTTP_1_0、HTTP_1_1、HTTP_2等
+    internal var protocols: List&lt;Protocol&gt; = DEFAULT_PROTOCOLS
+    //域名验证的具体接口实现。如果客户端跟服务端的hostName不一致的时候选择是否接受的策略
+    internal var hostnameVerifier: HostnameVerifier = OkHostnameVerifier
+    //按照我的理解是用于信任加入中间代理 如charles这种的代理
+    internal var certificatePinner: CertificatePinner = CertificatePinner.DEFAULT
+    //用于计算高效的证书链
+    internal var certificateChainCleaner: CertificateChainCleaner? = null
+    //调用超时时间
+    internal var callTimeout = 0
+    //连接超时时间 10_000 挺有意思的 是kotlin里面特有的写法
+    internal var connectTimeout = 10_000
+    //读数据超时时间
+    internal var readTimeout = 10_000
+    //写入流数超时时间
+    internal var writeTimeout = 10_000
+    //ping的间隔
+    internal var pingInterval = 0
+</code></pre>
+<p>从上面可以看出其实okhttp内部帮我们封装了很多可以修改的配置，参数一般有默认值，通过建造者模式我们可以选择性的设置我们想要的配置。okhttp也是我们学习这种设计模式的一个比较好的实践。</p>
+<p>构建client之后，我们会通过newCall方法传入一个Request 构造出一个Call.</p>
+<pre><code class="language-kotlin"> override fun newCall(request: Request): Call {
+    return RealCall.newRealCall(this, request, forWebSocket = false)
+  }
+</code></pre>
+<h4 id="request">Request</h4>
+<p>request字面意思就是请求的意思，那么一个请求会包含哪些信息呢？我们进去源码会发现其同样也是通过builder模式构建的。</p>
+<pre><code class="language-kotlin">    internal var url: HttpUrl? = null
+    internal var method: String
+    internal var headers: Headers.Builder
+    internal var body: RequestBody? = null
+</code></pre>
+<p>可以发现相对于client，request只有简单的几个参数。</p>
+<table>
+<thead>
+<tr>
+<th style="text-align:left">参数</th>
+<th style="text-align:center">说明</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align:left">url</td>
+<td style="text-align:center">代表此次请求的链接</td>
+</tr>
+<tr>
+<td style="text-align:left">method</td>
+<td style="text-align:center">代表当前请求的方法。如post、get、delete等</td>
+</tr>
+<tr>
+<td style="text-align:left">headers</td>
+<td style="text-align:center">一次请求中的头文件</td>
+</tr>
+<tr>
+<td style="text-align:left">body</td>
+<td style="text-align:center">请求体</td>
+</tr>
+</tbody>
+</table>
+<h4 id="call">Call</h4>
+<p>我们通过client.newCall()方法构造出来了一个call对象 。实际上是调用了RealCall.newRealCall(this, request, forWebSocket = false).第三个参数是代表不支持webSocket，因为本身是http请求。这点在构建request时HttpUrl类也会有相同的判断，直接把webSocket转换为http请求。具体的使用socket的场景在后续会进行分析。</p>
+<p>我们继续往下面看 newCall()方法到底做了什么事情:</p>
+<pre><code class="language-kotlin">  fun newRealCall(
+      client: OkHttpClient,
+      originalRequest: Request,
+      forWebSocket: Boolean
+    ): RealCall {
+      // Safely publish the Call instance to the EventListener.
+      return RealCall(client, originalRequest, forWebSocket).apply {
+        transmitter = Transmitter(client, this)
+      }
+    }
+</code></pre>
+<p>通过RealCall的构造方法实例出来一个realCall对象，字面意思可以知道后续的请求实际上是调用的realCall的对象。同时初始化了一个Transmitter。</p>
+<h4 id="transmitter">Transmitter</h4>
+<table><tr><td bgcolor=#f7f6f3>
+应用层和网络层之间的桥梁，对外暴露了像connections/requests/responses/streams 所以我们可以方便的拿到这些对象做操作。再结合拦截器的作用也就很好理解了
+</td></tr></table>
+<h4 id="请求流程">请求流程</h4>
+<p>我们知道okhttp是支持同步excute和异步enqueue的，那么内部究竟是怎么处理的呢？Android在某个版本之后已经不允许直接在主线程中进行网络请求了，所以我们这里直接分析异步请求的过程. 我们之前通过client.newCall已经构造出来Call对象。直接使用call.enqueue()就可以发起请求。Call定义的enqueue方法只是一个接口，具体实现是realCall中</p>
+<pre><code class="language-kotlin">  override fun enqueue(responseCallback: Callback) {
+    synchronized(this) {
+      //首先会进行防止重复请求的判断
+      check(!executed) { &quot;Already Executed&quot; }
+      executed = true
+    }
+   //追溯进去会发现这步是回调eventListener的callStart方法，前文在介绍okhttpclient的构造方法时有提到过
+    transmitter.callStart()
+    //这里是请求真正发起的地方 
+    client.dispatcher.enqueue(AsyncCall(responseCallback))
+  }
+</code></pre>
+<h5 id="dispatcher">Dispatcher</h5>
+<p>我们发现真正发起请求的地方是调用client里面的dispathcer对象执行enqueue方法，那dispatcher是什么鬼东东呢？我们继续来看注释：</p>
+<pre><code class="language-kotlin">Policy on when async requests are executed.
+用于管理异步请求什么时候执行的策略管理器
+Each dispatcher uses an [ExecutorService] to run calls internally. If you supply your own
+executor, it should be able to run [the configured maximum][maxRequests] number of calls concurrently.
+每个dispatcher本质上是使用ExecutorService来进行请求的调用。
+根据上面的注释我们还知道每个dispatcher其实是定义了一个最大请求并发数，默认是64
+</code></pre>
+<p>继续回到我们的主题:</p>
+<pre><code class="language-kotlin">internal fun enqueue(call: AsyncCall) {
+    synchronized(this) {
+      readyAsyncCalls.add(call)
+			
+      // Mutate the AsyncCall so that it shares the AtomicInteger of an existing running call to
+      // the same host.
+      if (!call.get().forWebSocket) {
+        val existingCall = findExistingCallWithHost(call.host())
+        if (existingCall != null) call.reuseCallsPerHostFrom(existingCall)
+      }
+    }
+    promoteAndExecute()
+  }
+</code></pre>
+<p>首先是使用了同步锁来保证线程同步,然后把当前请求对象添加到了一个ArrayDeque双端队列里。</p>
+<pre><code class="language-kotlin">  /** Ready async calls in the order they'll be run. */
+  private val readyAsyncCalls = ArrayDeque&lt;AsyncCall&gt;()
+
+  /** Running asynchronous calls. Includes canceled calls that haven't finished yet. */
+  private val runningAsyncCalls = ArrayDeque&lt;AsyncCall&gt;()
+
+  /** Running synchronous calls. Includes canceled calls that haven't finished yet. */
+  private val runningSyncCalls = ArrayDeque&lt;RealCall&gt;()
+</code></pre>
+<p>我们可以看到ok其实是定义了三个双端队列：</p>
+<ul>
+<li>异步请求等待队列</li>
+<li>异步请求执行队列</li>
+<li>同步请求执行队列</li>
+</ul>
+<p>首先执行的异步请求必须不是webSocket的类型才继续往下走，下一步是寻找是否存在相同host的请求。这里是通过原子类型来保证相同host的请求可以准确记录下来。接着调用promoteAndExecute()来进行请求；</p>
+<h5 id="promoteandexecute">promoteAndExecute</h5>
+<pre><code class="language-kotlin">private fun promoteAndExecute(): Boolean {
+  	//这里的写法很有意思，通过kotlin的assert来进行判断 不满足条件抛出一个异常，后续的开发其实可以借鉴。
+    assert(!Thread.holdsLock(this))
+  //构建一个空的AsyncCall list,AsyncCall 其实是自定义的runnable
+    val executableCalls = mutableListOf&lt;AsyncCall&gt;()
+    val isRunning: Boolean
+    synchronized(this) {
+      val i = readyAsyncCalls.iterator()
+      while (i.hasNext()) {
+        val asyncCall = i.next()
+
+        if (runningAsyncCalls.size &gt;= this.maxRequests) break // Max capacity.
+        if (asyncCall.callsPerHost().get() &gt;= this.maxRequestsPerHost) continue // Host max capacity.
+
+        i.remove()
+        asyncCall.callsPerHost().incrementAndGet()
+        executableCalls.add(asyncCall)
+        runningAsyncCalls.add(asyncCall)
+      }
+      isRunning = runningCallsCount() &gt; 0
+    }
+
+    for (i in 0 until executableCalls.size) {
+      val asyncCall = executableCalls[i]
+      asyncCall.executeOn(executorService)
+    }
+
+    return isRunning
+  }
+</code></pre>
+<p>大概总结一下这个方法做了什么事情:</p>
+<ul>
+<li>
+<p>从上文说的异步请求准备队列中通过迭代的方式取出请求任务</p>
+</li>
+<li>
+<p>判断并发请求是否超过最大数量</p>
+</li>
+<li>
+<p>往计数器中增加一次计数</p>
+</li>
+<li>
+<p>将call对象添加到executableCalls 以及 异步请求执行队列中</p>
+</li>
+<li>
+<p>循环从executableCalls 取出asyncCall对象调用executeOn()方法</p>
+</li>
+</ul>
+<h5 id="executeon">executeOn</h5>
+<pre><code class="language-kotlin">   fun executeOn(executorService: ExecutorService) {
+      assert(!Thread.holdsLock(client.dispatcher))
+      var success = false
+      try {
+        executorService.execute(this)
+        success = true
+      } catch (e: RejectedExecutionException) {
+        val ioException = InterruptedIOException(&quot;executor rejected&quot;)
+        ioException.initCause(e)
+        transmitter.noMoreExchanges(ioException)
+        responseCallback.onFailure(this@RealCall, ioException)
+      } finally {
+        if (!success) {
+          client.dispatcher.finished(this) // This call is no longer running!
+        }
+      }
+    }
+</code></pre>
+<p>分析到这里已经很明确了，executeOn方法是通过executorService的execute()方法来执行一次异步请求。如果请求中抛出异常那么会调用dispatcher的finish方法来结束本次请求。</p>
+<p>既然是通过异步执行，我们再来看一下run方法</p>
+<pre><code class="language-kotlin">   override fun run() {
+      threadName(&quot;OkHttp ${redactedUrl()}&quot;) {
+        var signalledCallback = false
+        transmitter.timeoutEnter()
+        try {
+          val response = getResponseWithInterceptorChain()
+          signalledCallback = true
+          responseCallback.onResponse(this@RealCall, response)
+        } catch (e: IOException) {
+          if (signalledCallback) {
+            // Do not signal the callback twice!
+            Platform.get().log(INFO, &quot;Callback failure for ${toLoggableString()}&quot;, e)
+          } else {
+            responseCallback.onFailure(this@RealCall, e)
+          }
+        } finally {
+          client.dispatcher.finished(this)
+        }
+      }
+    }
+</code></pre>
+<p>代码也同样很精简：</p>
+<ul>
+<li>
+<p>通过getResponseWithInterceptorChain()方法来获取请求的响应体（关于这个方法将在后续文章详细分析）</p>
+</li>
+<li>
+<p>通过接口回调将本次请求结果一层层回调给调用类</p>
+</li>
+</ul>
+<h4 id="总结">总结</h4>
+<p>以上基本上是客户端构建请求、发起请求、以及请求的整体流程。我们可以大概整理一下整个流程做了哪些关键的步骤：</p>
+<ul>
+<li>
+<p>客户端通过builder模式构建一个okHttpClient对象</p>
+</li>
+<li>
+<p>客户端通过builder模式构建一个Request对象</p>
+</li>
+<li>
+<p>通过okHttpClient.newCall(request:Request)方法来创建一个Call对象</p>
+</li>
+<li>
+<p>通过call.enqueue(callBack:CallBack)来发起一次异步请求</p>
+</li>
+<li>
+<p>请求时候是通过ExecutorService调用execute()方法来执行</p>
+</li>
+<li>
+<p>最终拿到响应体回调给客户端</p>
+</li>
+</ul>
+<p>当然真正请求的内部流程其实是要复杂的多，上面只是粗略的整理了一下，但是熟悉整个流程对于后面我们进入到okhttp核心代码分析的时候会更加有助于我们理解。以上就是okhttp源码分析的第一篇文章，后面会对每一步进行更详细的分析。</p>
+
+            </div>
+            
+            
+              <div class="next-post">
+                <div class="next">下一篇</div>
+                <a href="https://alsowell.github.io//post/teamviewer-auto-bind">
+                  <h3 class="post-title">
+                    Android开发板上TeamViewer的自动绑定
+                  </h3>
+                </a>
+              </div>
+            
+
+            
+
+          </div>
+
+        </div>
+      </div>
+    </div>
+
+    <script src="https://unpkg.com/aos@next/dist/aos.js"></script>
+
+<script type="application/javascript">
+
+AOS.init();
+
+hljs.initHighlightingOnLoad()
+
+var app = new Vue({
+  el: '#app',
+  data: {
+    menuVisible: false,
+  },
+})
+
+</script>
+
+
+
+
+  </body>
+</html>

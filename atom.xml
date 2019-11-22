@@ -2,7 +2,7 @@
 <feed xmlns="http://www.w3.org/2005/Atom">
     <id>https://alsowell.github.io/</id>
     <title>ALSOWELL`Blog</title>
-    <updated>2019-11-19T02:27:40.716Z</updated>
+    <updated>2019-11-22T06:18:22.332Z</updated>
     <generator>https://github.com/jpmonette/feed</generator>
     <link rel="alternate" href="https://alsowell.github.io/"/>
     <link rel="self" href="https://alsowell.github.io//atom.xml"/>
@@ -11,105 +11,79 @@
     <icon>https://alsowell.github.io//favicon.ico</icon>
     <rights>All rights reserved 2019, ALSOWELL`Blog</rights>
     <entry>
-        <title type="html"><![CDATA[ 再学Android:okhttp3.X(二)Interceptor：BridgeInterceptor]]></title>
+        <title type="html"><![CDATA[再学Android：OkHttp源码探究（四）BridgeInterceptor]]></title>
         <id>https://alsowell.github.io//post/okhttp_two</id>
         <link href="https://alsowell.github.io//post/okhttp_two">
         </link>
-        <updated>2019-11-19T02:17:44.000Z</updated>
-        <content type="html"><![CDATA[<p>  大多数人说到okhttp优秀的地方基本上都会脱口而出通过设置拦截器可以很方便的实现网络请求的打印、添加一些公共参数等等。那么其内部究竟是怎么实现的呢？我们来探一探路：</p>
-<ul>
-<li>默认的拦截器<br>
-  其实okhttp内部是有五个默认的拦截器，如下图：<br>
-<img src="https://alsowell.github.io//post-images/1574066927603.jpg" alt="">
-<ul>
-<li>BridgeInterceptor</li>
-</ul>
-</li>
-</ul>
+        <updated>2019-11-22T02:17:44.000Z</updated>
+        <content type="html"><![CDATA[<!-- more -->
+<h4 id="前言">前言</h4>
+<p>在上一篇文章中我们已经分析过了ok内置五个拦截器中的第一个RetryAndFollowUpInterceptor，本篇我们将继续按照顺序去探究一下BridgeInterceptor。</p>
+<h4 id="介绍">介绍</h4>
+<p>首先来看一下类注释：</p>
 <table><tr><td bgcolor=#f7f6f3>
-&emsp;&emsp;释义：应用层和网络层之间的桥接，首先往用户发起的请求中添加一部分网络层需要的参数，接着调用网络，最后从响应体中解析出用户请求的结果
+ Bridges from application code to network code. First it builds a network request from a user
+ request. Then it proceeds to call the network. Finally it builds a user response from the network response.
+<br></br>
+释义：应用层和网络层之间的桥接，首先往用户发起的请求中添加一部分网络层需要的参数，接着调用网络，最后从响应体中解析出用户请求的结果
 </td></tr></table>
-&emsp;&emsp;我们首先看一下拦截器会往请求中添加什么参数，为了阅读方便，将直接在代码中逐行分析。
-<pre><code class="language-kotlin">class BridgeInterceptor(private val cookieJar: CookieJar) : Interceptor {
-  @Throws(IOException::class)
+接着我们直接上代码：
+<pre><code class="language-kotlin">  @Throws(IOException::class)
   override fun intercept(chain: Interceptor.Chain): Response {
-      //首先从请求调用链中获取到request，request我们前文有分析过
     val userRequest = chain.request()
-    //通过newBuilder.build的方式重新构建一个request 至于为什么这么做。将在后续文章分析
-     val requestBuilder = userRequest.newBuilder()
-    //拿到请求的body体 基本上对应post请求类型
+    val requestBuilder = userRequest.newBuilder()
+
     val body = userRequest.body
     if (body != null) {
       val contentType = body.contentType()
       if (contentType != null) {
-          //将请求体类型 放入header  如application/json
         requestBuilder.header(&quot;Content-Type&quot;, contentType.toString())
       }
-        
       val contentLength = body.contentLength()
-       //获取请求体的长度放入header
-       //Transfer-Encoding 字面意思也很好理解，即为传输过程中的编码格式
-       //根据网上资料:首部字段Transfer-Encoding规定了传输报文主体时采用的编码方式。HTTP
-       //1.1的传输编码方式仅对分块传输编码有效。值为 chunked 表示请求体的内容大小是未知的。       
-       //因此Transfer-Encoding与Content-Length两个首部不能共存。
       if (contentLength != -1L) {
         requestBuilder.header(&quot;Content-Length&quot;, contentLength.toString())
-             requestBuilder.removeHeader(&quot;Transfer-Encoding&quot;)
+        requestBuilder.removeHeader(&quot;Transfer-Encoding&quot;)
       } else {
         requestBuilder.header(&quot;Transfer-Encoding&quot;, &quot;chunked&quot;)
         requestBuilder.removeHeader(&quot;Content-Length&quot;)
       }
     }
-    //Host即对应请求中的域名 对此HttpUrl中有详细的注释解释
-    //| URL                   | `host()`        |
-    //| :-------------------- | :-------------- |
-    //| `http://android.com/` | `&quot;android.com&quot;` |
-    //| `http://127.0.0.1/`   | `&quot;127.0.0.1&quot;`   |
-    //| `http://[::1]/`       | `&quot;::1&quot;`         |
-    //| `http://xn--n3h.net/` | `&quot;xn--n3h.net&quot;` |
-    //其中toHostHeader()方法会取到对应的域名并且拼接上默认的端口 http默认端口80 、https默认端口443
     if (userRequest.header(&quot;Host&quot;) == null) {
-       requestBuilder.header(&quot;Host&quot;, userRequest.url.toHostHeader())
+      requestBuilder.header(&quot;Host&quot;, userRequest.url.toHostHeader())
     }
-    //指定连接模式为 Keep-Alive 这样就能方便的复用连接池
+
     if (userRequest.header(&quot;Connection&quot;) == null) {
       requestBuilder.header(&quot;Connection&quot;, &quot;Keep-Alive&quot;)
     }
 
     // If we add an &quot;Accept-Encoding: gzip&quot; header field we're responsible for also decompressing
     // the transfer stream.
-    //如果设置的接收格式是gzip 那么响应结束时也会解码
     var transparentGzip = false
     if (userRequest.header(&quot;Accept-Encoding&quot;) == null &amp;&amp; userRequest.header(&quot;Range&quot;) == null) {
       transparentGzip = true
-      
       requestBuilder.header(&quot;Accept-Encoding&quot;, &quot;gzip&quot;)
     }
-    //从request中取出cookie 并将它放入请求头中
+
     val cookies = cookieJar.loadForRequest(userRequest.url)
     if (cookies.isNotEmpty()) {
       requestBuilder.header(&quot;Cookie&quot;, cookieHeader(cookies))
     }
-    //请求头中放入 user-agent 如果是空 那么放入默认 agent:okhttp/x.x.x
+
     if (userRequest.header(&quot;User-Agent&quot;) == null) {
       requestBuilder.header(&quot;User-Agent&quot;, userAgent)
     }
-    //这一步是拿到响应体 
+
     val networkResponse = chain.proceed(requestBuilder.build())
-    //从header中解析出来cookie 如果存在那么就保存下来 
-       cookieJar.receiveHeaders(userRequest.url, networkResponse.headers)
+
+    cookieJar.receiveHeaders(userRequest.url, networkResponse.headers)
+    
     val responseBuilder = networkResponse.newBuilder()
         .request(userRequest)
-
-    //这步是做了判断 如果Content-Encoding是gzip类型，并且content-length &gt;0 
-    //取出body进行处理
     if (transparentGzip &amp;&amp;
         &quot;gzip&quot;.equals(networkResponse.header(&quot;Content-Encoding&quot;), ignoreCase = true) &amp;&amp;
         networkResponse.promisesBody()) {
       val responseBody = networkResponse.body
       if (responseBody != null) {
-          //对请求响应体做一遍处理 因为响应体的body的传输格式是gzip类型 
-          //通过封装的方法类解析处理
         val gzipSource = GzipSource(responseBody.source())
         val strippedHeaders = networkResponse.headers.newBuilder()
             .removeAll(&quot;Content-Encoding&quot;)
@@ -117,48 +91,649 @@
             .build()
         responseBuilder.headers(strippedHeaders)
         val contentType = networkResponse.header(&quot;Content-Type&quot;)
-        //解析成为用户真正可使用的body
         responseBuilder.body(RealResponseBody(contentType, -1L, gzipSource.buffer()))
       }
     }
-
     return responseBuilder.build()
   }
-
 </code></pre>
-<p>  到此为止整个BridgeInterceptor就分析完成了，我们来做一下总结：</p>
+<p>相对于上一篇的重试拦截器，bridge拦截器的代码相对来说是非常容易看懂的。我们将按照interceptor的调用来分为两个阶段分析：</p>
+<h4 id="request阶段">Request阶段</h4>
+<ul>
+<li>
+<p>取出body的contentType设置到header里面</p>
+</li>
+<li>
+<p>获取请求体的长度放入header</p>
+<ul>
+<li>Transfer-Encoding 字面意思也很好理解，即为传输过程中的编码格式<br>
+根据网上资料:首部字段Transfer-Encoding规定了传输报文主体时采用的编码方式。HTTP1.1的传输编码方式仅对分块传输编码有效。值为 chunked 表示请求体的内容大小是未知的。    因此Transfer-Encoding与Content-Length两个首部不能共存。</li>
+</ul>
+</li>
+<li>
+<p>将请求的host放入到header里面</p>
+<ul>
+<li>
+<p>Host即对应请求中的域名 对此HttpUrl中有详细的注释解释</p>
+<table>
+<thead>
+<tr>
+<th style="text-align:left">URL</th>
+<th style="text-align:left"><code>host()</code></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align:left"><code>http://android.com/</code></td>
+<td style="text-align:left"><code>&quot;android.com&quot;</code></td>
+</tr>
+<tr>
+<td style="text-align:left"><code>http://127.0.0.1/</code></td>
+<td style="text-align:left"><code>&quot;127.0.0.1&quot;</code></td>
+</tr>
+<tr>
+<td style="text-align:left"><code>http://[::1]/</code></td>
+<td style="text-align:left"><code>&quot;::1&quot;</code></td>
+</tr>
+<tr>
+<td style="text-align:left"><code>http://xn--n3h.net/</code></td>
+<td style="text-align:left"><code>&quot;xn--n3h.net&quot;</code></td>
+</tr>
+</tbody>
+</table>
+</li>
+<li>
+<p>其中toHostHeader()方法会取到对应的域名并且拼接上默认的端口 http默认端口80 、https默认端口443</p>
+</li>
+</ul>
+</li>
+<li>
+<p>指定连接模式为 Keep-Alive 这样就能方便的复用连接池。</p>
+</li>
+<li>
+<p>如果用户没有设置Accept-Encoding，那么会指定数据接收格式为gzip。顺带提一下：gzip格式压缩能大大减少网络流量的消耗。</p>
+</li>
+<li>
+<p>header中放入cookie</p>
+</li>
+<li>
+<p>请求头中放入 user-agent 如果用户没有设置，那么放入默认 agent:okhttp/x.x.x</p>
+</li>
+</ul>
+<h4 id="response阶段">Response阶段</h4>
+<ul>
+<li>首先是根据url拿到返回的cookie。</li>
+<li>如果Content-Encoding是gzip类型，并且content-length &gt;0 取出body进行处理</li>
+<li>对请求响应体做一遍处理，因为响应体的body的传输格式是gzip类型，通过封装的方法类解析处理</li>
+<li>解析成为用户真正可使用的body</li>
+</ul>
+<h4 id="总结">总结</h4>
+<p>以上就是整个BridgeInterceptor的全部流程了。大概可以分为三步</p>
 <ul>
 <li>对用户的请求做一遍处理，如果用户设置了参数使用用户配置，如果未设置那么就使用默认的。</li>
-<li>通过chain调用下一个拦截器</li>
-<li>对接口的请求做一遍处理，比如gzip、cookie 最后解析成用户真正可使用的body</li>
+<li>通过chain调用下一个拦截器。</li>
+<li>对接口的请求做一遍处理，比如gzip、cookie 最后解析成用户真正可使用的body。</li>
 </ul>
-<p>  由上可知，BridgeInterceptor其实是okhttp为了方便用户使用封装的一个拦截器，让用户少做了很多重复繁杂的工作。</p>
+<p>可以看到整个BridgeInterceptor的流程还是非常简单的，无非就是对网络传输协议中一些必须参数的封装，这样应用层在调用的时候就省去了这些步骤。</p>
 ]]></content>
     </entry>
     <entry>
-        <title type="html"><![CDATA[再学Android:okhttp3.X(一)Request&OkHttpClient]]></title>
-        <id>https://alsowell.github.io//post/okhttp_one</id>
-        <link href="https://alsowell.github.io//post/okhttp_one">
+        <title type="html"><![CDATA[再学Android:OkHttp源码探究(三) RetryAndFollowUpInterceptor]]></title>
+        <id>https://alsowell.github.io//post/zai-xue-androidokhttp-yuan-ma-tan-jiu-san-retryandfollowupinterceptor</id>
+        <link href="https://alsowell.github.io//post/zai-xue-androidokhttp-yuan-ma-tan-jiu-san-retryandfollowupinterceptor">
         </link>
-        <updated>2019-11-16T03:30:49.000Z</updated>
-        <content type="html"><![CDATA[<h3 id="写在前面">写在前面</h3>
-<p>  本人从事Android开发工作几年，也算是见证了Android的技术变革。拿网络库来讲从最开始使用的xUtils到 <a href="https://github.com/google/volley">volley</a>然后到现在主流的<a href="https://github.com/square/okhttp">okhttp</a>。更不要说热更新、插件化、以及路由开发模式的大行其道。<br>
-有感于工作中大多时候是仅限于使用,于是打算写一系列关于Android开发中使用到的框架解析，也算是对自己理解的一个记录。</p>
-<h3 id="正文">正文</h3>
-<p>  网上看到一个观点：当我们想深入了解一个框架的时候，第一步是要会用，然后按照框架的流程图一步一步的去慢慢的探索分析。对于这个观点笔者是非常赞同的，优秀的框架都是有清晰的架构、核心思想也都采用了优秀的设计模式。下面我们从okhttp开始分析</p>
-<h4 id="step1">Step1:</h4>
-<p>  鉴于网上已经有很多详尽的流程图，这里直接借鉴一张<br>
-<img src="https://alsowell.github.io//post-images/1573878925540.png" alt=""></p>
-<center> 图片来源:https://www.cnblogs.com/huangjialin/p/9469373.html </center>
-&emsp;&emsp;一般我们使用okhttp都是从构建一个client开始。注：本人分析所用源码是官方使用Kotlin重写版本。
-<pre><code class="language-kotlin">        val okHttpClient = OkHttpClient.Builder()
-                .connectTimeout(10, TimeUnit.SECONDS)
-                .writeTimeout(10, TimeUnit.SECONDS)
-                .readTimeout(10, TimeUnit.SECONDS)
-                .build()
-        val request = Request.Builder().url(&quot;http://www.baidu.com&quot;)
-                .get()
-                .build()
+        <updated>2019-11-21T12:17:21.000Z</updated>
+        <content type="html"><![CDATA[<h4 id="前言">前言</h4>
+<p>前面的文章我们分析了整个okhttp的核心其实是getResponseWithInterceptor方法。内部是通过一系列的拦截器调用来完成整个网络请求。我们也知道了ok内部定义了五个拦截器。拦截器又是通过责任链模式来递归进行调用。本篇文章我们将按照加载顺序来分析第一个拦截器<strong>RetryAndFollowUpInterceptor</strong></p>
+<p>####介绍</p>
+<p>按照字面意思来理解就是一个管理重试和后续动作的拦截器，那么究竟是怎么做的呢？简单，上注释！</p>
+<pre><code class="language-kotlin">//这个拦截器主要是用来处理失败和重定向的请求，如果请求被取消可能会抛出io异常 
+/**
+ * This interceptor recovers from failures and follows redirects as necessary. It may throw an
+ * [IOException] if the call was canceled.
+ */
+</code></pre>
+<p>看来前面的理解也没有问题，规范的命名确实能让人一看就知道什么意思。那直接进入正文。</p>
+<h4 id="核心功能">核心功能</h4>
+<ul>
+<li>
+<p>失败重试</p>
+<ul>
+<li>在遇到RouteException和IOException通过recover()方法判断当前请求是否可以重新尝试。</li>
+</ul>
+</li>
+<li>
+<p>继续发起请求</p>
+<ul>
+<li>
+<p>通过followUpRequest()方法来判断当前是否可以继续发起请求，主要根据响应码来判断</p>
+<table>
+<thead>
+<tr>
+<th>应码</th>
+<th>说明</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>07</td>
+<td>代理鉴权失败、调用 Authenticator 进行授权后继续发起新的请求</td>
+</tr>
+<tr>
+<td>01</td>
+<td>鉴权失败、调用 Authenticator 进行授权后继续发起新的请求</td>
+</tr>
+<tr>
+<td>07、308</td>
+<td>重定向，method不为get 和head情况下 ，重新发起新的请求</td>
+</tr>
+<tr>
+<td>00、301、302、303</td>
+<td>重定向，重新发起新的请求</td>
+</tr>
+<tr>
+<td>08</td>
+<td>客户端请求超时，会继续发起新的请求</td>
+</tr>
+<tr>
+<td>03</td>
+<td>服务不可用，会继续发起新的请求</td>
+</tr>
+<tr>
+<td>lse</td>
+<td>直接发起新的请求</td>
+</tr>
+</tbody>
+</table>
+<ul>
+<li>注意：请求重试次数是受到MAX_FOLLOW_UPS 限制的，默认是20</li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+<p>经过前面文章的分析我们知道每一个拦截器都是在intercept里面操作的，那我们直接来分析一下：</p>
+<pre><code class="language-kotlin">@Throws(IOException::class)
+  override fun intercept(chain: Interceptor.Chain): Response {
+    var request = chain.request()
+    //1
+    val realChain = chain as RealInterceptorChain
+    val transmitter = realChain.transmitter()
+    var followUpCount = 0
+    var priorResponse: Response? = null
+    while (true) {
+      //2
+      transmitter.prepareToConnect(request)
+      if (transmitter.isCanceled) {
+        throw IOException(&quot;Canceled&quot;)
+      }
+      var response: Response
+      var success = false
+      try {
+        //3
+        response = realChain.proceed(request, transmitter, null)
+        success = true
+      } catch (e: RouteException) {
+        // The attempt to connect via a route failed. The request will not have been sent.
+        if (!recover(e.lastConnectException, transmitter, false, request)) {
+          throw e.firstConnectException
+        }
+        continue
+        //4
+      } catch (e: IOException) {
+        // An attempt to communicate with a server failed. The request may have been sent.
+        val requestSendStarted = e !is ConnectionShutdownException
+        if (!recover(e, transmitter, requestSendStarted, request)) throw e
+        continue
+      } finally {
+        // The network call threw an exception. Release any resources.
+        if (!success) {
+          transmitter.exchangeDoneDueToException()
+        }
+      }
+      // Attach the prior response if it exists. Such responses never have a body.
+      if (priorResponse != null) {
+        response = response.newBuilder()
+            .priorResponse(priorResponse.newBuilder()
+                .body(null)
+                .build())
+            .build()
+      }
+      val exchange = response.exchange
+      val route = exchange?.connection()?.route()
+      //5
+      val followUp = followUpRequest(response, route)
+      if (followUp == null) {
+        if (exchange != null &amp;&amp; exchange.isDuplex) {
+          transmitter.timeoutEarlyExit()
+        }
+        return response
+      }
+      val followUpBody = followUp.body
+      //6
+      if (followUpBody != null &amp;&amp; followUpBody.isOneShot()) {
+        return response
+      }
+      response.body?.closeQuietly()
+      if (transmitter.hasExchange()) {
+        exchange?.detachWithViolence()
+      }
+      //7
+      if (++followUpCount &gt; MAX_FOLLOW_UPS) {
+        throw ProtocolException(&quot;Too many follow-up requests: $followUpCount&quot;)
+      }
+      request = followUp
+      priorResponse = response
+    }
+  }
+</code></pre>
+<h4 id="主要步骤">主要步骤</h4>
+<ul>
+<li>
+<p>在上一篇文章中我们分析过，拦截器会通过构造RealInterceptorChain对象，并且把其作为参数通过调用当前interceptor的intercept方法来进行递归调用。并且也知道可以通过chain来获取到request、connection等对象。同样在重试拦截器中也是一样。第一步首先是拿到request 、realChain、transmitter对象。</p>
+</li>
+<li>
+<p>进入到while循环中，首先调用transmitter的prepareToConnect方法。我们跟进去看一下：</p>
+<pre><code class="language-kotlin">fun prepareToConnect(request: Request) {
+    if (this.request != null) {
+      if (this.request!!.url.canReuseConnectionFor(request.url) &amp;&amp; exchangeFinder!!.hasRouteToTry()) {
+        return // Already ready.
+      }
+      check(exchange == null)
+      if (exchangeFinder != null) {
+        maybeReleaseConnection(null, true)
+        exchangeFinder = null
+      }
+    }
+    this.request = request
+    this.exchangeFinder = ExchangeFinder(
+        this, connectionPool, createAddress(request.url), call, eventListener)
+  }
+</code></pre>
+<ul>
+<li>不是第一次进入这个方法的时候
+<ul>
+<li>首先会判断是否可以服用连接池并且仍然处于重试过程中。</li>
+<li>如果exchangeFinder不为空情况下 尝试关闭连接。并且回调eventListener connectionReleased方法，接着根据请求是否失败回调callFailed或者callEnd</li>
+</ul>
+</li>
+<li>首次进入情况下
+<ul>
+<li>构建出exchangeFinder对象，为后续的网络连接做准备</li>
+</ul>
+</li>
+</ul>
+</li>
+<li>
+<p>判断请求是否被取消，如果取消抛出异常。</p>
+<ul>
+<li>
+<pre><code class="language-kotlin">  fun cancel() {
+    val exchangeToCancel: Exchange?
+    val connectionToCancel: RealConnection?
+    synchronized(connectionPool) {
+      canceled = true
+      exchangeToCancel = exchange
+      connectionToCancel = exchangeFinder?.connectingConnection() ?: connection
+    }
+    exchangeToCancel?.cancel() ?: connectionToCancel?.cancel()
+  }
+</code></pre>
+</li>
+</ul>
+<p>通过调用链我们可以发现，这个方法只会在应用层通过Call对象的cancel方法调用到。</p>
+</li>
+<li>
+<p>调用realChain的proceed方法</p>
+<ul>
+<li>
+<p>还记得我们在上一篇文章中分析过这个方法其实是递归调用后续的拦截器并且将下一级的结果返回到当前处理。</p>
+</li>
+<li>
+<p>通过try-catch 捕获在网络请求过程中可能出现的异常，如果未发生异常success为true，反之为false。</p>
+<ul>
+<li>
+<p>RouteException</p>
+<ul>
+<li>异常发生在请求还没发出之前，追溯源码会发现其实是发生在connect过程中。</li>
+</ul>
+</li>
+<li>
+<p>IOException</p>
+<ul>
+<li>异常发生请求可能已经发出，并且在读取服务端的响应过程中出错。</li>
+</ul>
+</li>
+<li>
+<p>通过recover方法判断是否是值得重试的异常，判断依据如下：</p>
+<pre><code class="language-kotlin"> private fun recover(
+    e: IOException,
+    transmitter: Transmitter,
+    requestSendStarted: Boolean,
+    userRequest: Request
+  ): Boolean {
+    // The application layer has forbidden retries.
+    if (!client.retryOnConnectionFailure) return false
+    // We can't send the request body again.
+    if (requestSendStarted &amp;&amp; requestIsOneShot(e, userRequest)) return false
+    // This exception is fatal.
+    if (!isRecoverable(e, requestSendStarted)) return false
+    // No more routes to attempt.
+    if (!transmitter.canRetry()) return false
+    // For failure recovery, use the same route selector with a new connection.
+    return true
+  }
+</code></pre>
+<ul>
+<li>
+<p>应用层设置失败是否重试</p>
+<figure data-type="image" tabindex="1"><img src="/Users/mc/Desktop/%E6%96%87%E7%AB%A0%E5%9B%BE%E7%89%87/WechatIMG133355.tiff" alt=""></figure>
+</li>
+<li>
+<p>是否有相同的请求正在执行</p>
+</li>
+<li>
+<p>是否是可恢复的异常</p>
+</li>
+<li>
+<pre><code class="language-kotlin">private fun isRecoverable(e: IOException, requestSendStarted: Boolean): Boolean {
+    if (e is ProtocolException) {
+      return false
+    }
+    if (e is InterruptedIOException) {
+      return e is SocketTimeoutException &amp;&amp; !requestSendStarted
+    }
+    if (e is SSLHandshakeException) {
+      if (e.cause is CertificateException) {
+        return false
+      }
+    }
+    if (e is SSLPeerUnverifiedException) {
+      return false
+    }
+    return true
+  }
+</code></pre>
+<ul>
+<li>
+<p>ProtocolException 协议异常</p>
+<p><img src="/Users/mc/Desktop/%E6%96%87%E7%AB%A0%E5%9B%BE%E7%89%87/1574337835415.jpg" alt="">主要发生在 RealConnection 中创建 HTTPS 通过 HTTP 代理进行连接重试超过 21 次。</p>
+</li>
+</ul>
+</li>
+<li>
+<p>InterruptedIOException</p>
+<ul>
+<li>io终端异常，但是如果当前是一个连接超时异常，会进入到后续的判断，即根据响应码判断是否可重试。</li>
+</ul>
+</li>
+<li>
+<p>SSLHandshakeException</p>
+<ul>
+<li>https握手失败异常，不可重试。</li>
+</ul>
+</li>
+<li>
+<p>SSLPeerUnverifiedException</p>
+<ul>
+<li>网站的证书是不可信任的异常，不可重试</li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+</li>
+<li>
+<p>是否已经失败过并且具有可以重试的route</p>
+</li>
+<li>
+<p>如果请求未成功那么释放在上一次请求过程中的所有资源</p>
+</li>
+<li>
+<p>从response中获取到 exchange、route对象。</p>
+</li>
+<li>
+<p>调用followUpRequest方法 根据上次请求的返回码来确定是否需要重新尝试，关于响应码的分析在文章开头已经介绍过。</p>
+</li>
+<li>
+<p>自增记录重试次数并且判断是否超过默认值</p>
+</li>
+</ul>
+<h4 id="总结">总结</h4>
+<p>经过上面的分析我们可以知道：重试拦截器其实内部的逻辑还是有点小复杂的，首先定义了每个请求的最大默认尝试次数。然后在请求没有获取到响应时通过异常类型来判断是否可以继续重试。在获取到响应体阶段则是通过状态吗来判断。这里是不是更好理解：okhttp每个拦截器都是分为了Request阶段和Response阶段。到这里，我们对RetryAndFollowUpInterceptor的分析就告一段落了，下一章将会分析BridgeInterceptor。</p>
+<h4 id="参考资料">参考资料</h4>
+<p><a href="https://juejin.im/post/5aa23fa46fb9a028cb2d3a96">源码分析三：OkHttp—RetryAndFollowUpInterceptor</a></p>
+]]></content>
+    </entry>
+    <entry>
+        <title type="html"><![CDATA[再学Android:OkHttp源码探究(二)getResponseWithInterceptorChain]]></title>
+        <id>https://alsowell.github.io//post/zai-xue-androidokhttp-yuan-ma-tan-jiu-er-getresponsewithinterceptorchain</id>
+        <link href="https://alsowell.github.io//post/zai-xue-androidokhttp-yuan-ma-tan-jiu-er-getresponsewithinterceptorchain">
+        </link>
+        <updated>2019-11-21T03:18:33.000Z</updated>
+        <content type="html"><![CDATA[<h4 id="前言">前言</h4>
+<p>上一篇文章中我们简单的总结了ok发起请求并接收响应的整个流程，我们发现关键步骤是getResponseWithInterceptorChain这个方法。那这里面又做了什么事情呢？还是首先来看一下代码：</p>
+<pre><code class="language-kotlin"> @Throws(IOException::class)
+  fun getResponseWithInterceptorChain(): Response {
+    // Build a full stack of interceptors.
+    val interceptors = mutableListOf&lt;Interceptor&gt;()
+    interceptors += client.interceptors
+    interceptors += RetryAndFollowUpInterceptor(client)
+    interceptors += BridgeInterceptor(client.cookieJar)
+    interceptors += CacheInterceptor(client.cache)
+    interceptors += ConnectInterceptor
+    if (!forWebSocket) {
+      interceptors += client.networkInterceptors
+    }
+    interceptors += CallServerInterceptor(forWebSocket)
+
+    val chain = RealInterceptorChain(interceptors, transmitter, null, 0, originalRequest, this,
+        client.connectTimeoutMillis, client.readTimeoutMillis, client.writeTimeoutMillis)
+
+    var calledNoMoreExchanges = false
+    try {
+      val response = chain.proceed(originalRequest)
+      if (transmitter.isCanceled) {
+        response.closeQuietly()
+        throw IOException(&quot;Canceled&quot;)
+      }
+      return response
+    } catch (e: IOException) {
+      calledNoMoreExchanges = true
+      throw transmitter.noMoreExchanges(e) as Throwable
+    } finally {
+      if (!calledNoMoreExchanges) {
+        transmitter.noMoreExchanges(null)
+      }
+    }
+  }
+</code></pre>
+<p>可以说这个方法是整个okhttp的核心，通过这么几行代码就实现了整个请求的过程。这里不得不提到ok的拦截器机制。大多数人说到okhttp优秀的地方基本上都会脱口而出通过设置拦截器可以很方便的实现网络请求的打印、添加一些公共参数等等。而拦截器真正的运行其实就是在这个方法中。</p>
+<ul>
+<li>首先在interceptors中添加用户自定义的拦截器</li>
+<li>然后按顺序添加各种系统内置的拦截器</li>
+<li>通过RealInterceptorChain方法获取一个chain对象</li>
+<li>通过chain.proceed获取response</li>
+</ul>
+<h4 id="拦截器">拦截器</h4>
+<p>说了这么久的拦截器，肯定会好奇它究竟是个什么妖魔鬼怪：</p>
+<pre><code class="language-kotlin">/**
+ * Observes, modifies, and potentially short-circuits requests going out and the corresponding
+ * responses coming back in. Typically interceptors add, remove, or transform headers on the request
+ * or response.
+ */
+interface Interceptor {
+  @Throws(IOException::class)
+  fun intercept(chain: Chain): Response
+
+  companion object {
+    inline operator fun invoke(crossinline block: (chain: Chain) -&gt; Response): Interceptor =
+        object : Interceptor {
+          override fun intercept(chain: Chain) = block(chain)
+        }
+  }
+  interface Chain {
+    fun request(): Request
+
+    @Throws(IOException::class)
+    fun proceed(request: Request): Response
+    fun connection(): Connection?
+    fun call(): Call
+    fun connectTimeoutMillis(): Int
+    fun withConnectTimeout(timeout: Int, unit: TimeUnit): Chain
+    fun readTimeoutMillis(): Int
+    fun withReadTimeout(timeout: Int, unit: TimeUnit): Chain
+    fun writeTimeoutMillis(): Int
+    fun withWriteTimeout(timeout: Int, unit: TimeUnit): Chain
+  }
+}
+
+</code></pre>
+<p>Interceptor实际上是一个接口，里面定义了一个intercept方法和chain的接口类。</p>
+<h5 id="intercept">intercept</h5>
+<p>关于intercept方法是不是很熟悉？我们在自定义拦截器的时候往往都是在这里面做一些瞎操作。</p>
+<pre><code class="language-kotlin">   override fun intercept(chain: Interceptor.Chain): Response {
+        val request = chain.request()
+        val realInterceptorChain = chain as RealInterceptorChain
+        val transmitter = realInterceptorChain.transmitter()
+        val response = realInterceptorChain.proceed(request, transmitter, null)
+        return response
+
+    }
+</code></pre>
+<ul>
+<li>这里首先是通过chain.request获取请求的request对象</li>
+<li>通过chain.proceed 递归调用下一个拦截器的intercept方法</li>
+<li>最终返回chain.proceed的response到上一级拦截器</li>
+</ul>
+<h5 id="分层">分层</h5>
+<p>这里其实是将每个拦截器分为了两个阶段：</p>
+<ul>
+<li>Request阶段：执行该拦截器在请求前做的事，例如：bridgeInterceptor添加一些请求参数</li>
+<li>Response阶段：执行拦截器在获取响应之后做的事，例如：打印出请求体的返回</li>
+</ul>
+<p>拦截器的设计其实是采用了递归调用的思想，仔细想想其实是非常巧妙的，这样可以保证不论是系统内置还是用户自定义的拦截器都可以得到最终执行。如果在某个拦截器中出现了错误，还可以把错误抛给上一层来处理。</p>
+<h5 id="内置拦截器">内置拦截器</h5>
+<p>通过剖析源码我们会发现,ok内部其实是帮我们内置了好几种拦截器，每次请求都会添加进去，我们按照添加顺序整理如下：</p>
+<table>
+<thead>
+<tr>
+<th style="text-align:center">拦截器</th>
+<th style="text-align:center">说明</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align:center">RetryAndFollowUpInterceptor</td>
+<td style="text-align:center">负责实现重定向功能</td>
+</tr>
+<tr>
+<td style="text-align:center">BridgeInterceptor</td>
+<td style="text-align:center">将用户构造的请求转换为向服务器发送的请求，将服务器返回的响应转换为对用户友好的响应</td>
+</tr>
+<tr>
+<td style="text-align:center">CacheInterceptor</td>
+<td style="text-align:center">读取缓存、更新缓存</td>
+</tr>
+<tr>
+<td style="text-align:center">ConnectInterceptor</td>
+<td style="text-align:center">建立与服务器的连接</td>
+</tr>
+<tr>
+<td style="text-align:center">CallServerInterceptor</td>
+<td style="text-align:center">从服务器读取响应</td>
+</tr>
+</tbody>
+</table>
+<p>可以看出，整个网络请求的过程是通过各个拦截器相互配合来实现，假如我们在网络请求过程中设置允许缓存，那么在请求网络之前会预先获取缓存，然后再去跟服务器建立连接。通过拦截器的机制，我们可以很方便的控制整个网络请求的过程以及添加我们自己的拓展。</p>
+<p>整个网络请求过程中，用户其实是可以添加两种不同类型的拦截器的。</p>
+<ul>
+<li>通过 addInterceptor()在网络请求前后添加拦截器</li>
+<li>通过networkInterceptors()在获取响应前后添加拦截器</li>
+</ul>
+<p>这一点在getResponseWithInterceptorChain（）方法中添加拦截器的顺序是可以分析出来的。</p>
+<h5 id="整体流程">整体流程</h5>
+<p><img src="https://user-gold-cdn.xitu.io/2019/11/21/16e8bf6522fc07a5?w=1064&amp;h=1004&amp;f=jpeg&amp;s=89681" alt=""><br>
+图片来源:https://blog.n0texpecterr0r.cn/?p=717</p>
+<h4 id="realinterceptorchain">RealInterceptorChain</h4>
+<p>经过上面的分析我们知道okhttp的实际请求和响应过程是通过一个个拦截器的递归调用来实现的。主要方法就是</p>
+<p>realInterceptorChain.proceed。我们先来看一下RealInterceptorChain的构造方法</p>
+<pre><code class="language-kotlin">class RealInterceptorChain(
+  private val interceptors: List&lt;Interceptor&gt;,
+  private val transmitter: Transmitter,
+  private val exchange: Exchange?,
+  private val index: Int,
+  private val request: Request,
+  private val call: Call,
+  private val connectTimeout: Int,
+  private val readTimeout: Int,
+  private val writeTimeout: Int
+) 
+</code></pre>
+<p>这里其实是将上一个拦截器的一些参数传递进来并且赋值的简单实现。包括所有的拦截器、以及我们在第一篇文章提到的transmitter等。整个类中最关键的还是proceed方法</p>
+<pre><code class="language-kotlin">  @Throws(IOException::class)
+  fun proceed(request: Request, transmitter: Transmitter, exchange: Exchange?): Response {
+    if (index &gt;= interceptors.size) throw AssertionError()
+    calls++
+    // If we already have a stream, confirm that the incoming request will use it.
+    check(this.exchange == null || this.exchange.connection()!!.supportsUrl(request.url)) {
+      &quot;network interceptor ${interceptors[index - 1]} must retain the same host and port&quot;
+    }
+    // If we already have a stream, confirm that this is the only call to chain.proceed().
+    check(this.exchange == null || calls &lt;= 1) {
+      &quot;network interceptor ${interceptors[index - 1]} must call proceed() exactly once&quot;
+    }
+    // Call the next interceptor in the chain.
+    val next = RealInterceptorChain(interceptors, transmitter, exchange,
+        index + 1, request, call, connectTimeout, readTimeout, writeTimeout)
+    val interceptor = interceptors[index]
+    @Suppress(&quot;USELESS_ELVIS&quot;)
+    val response = interceptor.intercept(next) ?: throw NullPointerException(
+        &quot;interceptor $interceptor returned null&quot;)
+    // Confirm that the next interceptor made its required call to chain.proceed().
+    check(exchange == null || index + 1 &gt;= interceptors.size || next.calls == 1) {
+      &quot;network interceptor $interceptor must call proceed() exactly once&quot;
+    }
+    check(response.body != null) { &quot;interceptor $interceptor returned a response with no body&quot; }
+    return response
+  }
+</code></pre>
+<p>可以看到这个方法中除了大量的判读逻辑，比较关键的就是通过index+1取到下一个RealInterceptorChain对象 。</p>
+<p>然后获取当前的拦截器并且调用其intercept方法 ，方法参数中传入了下一个拦截器的对应的chain。就是这样通过递归调用的设计，实现了由上而下，再由下而上实现了递与归的过程。从而非常漂亮的实现了http请求的全链路。</p>
+<p>看到这里有没有觉得这种设计模式很熟悉，没错就是责任链模式。这种设计模式在一个流程会有多种操作的业务场景下会非常实用。</p>
+<h4 id="总结">总结</h4>
+<p>本篇文章我们主要是分析了整个网络请求过程中非常重要的getResponseWithInterceptorChain()方法，内部通过责任链的模式递归调用用户自定义拦截器和内置拦截器来完成整个网络请求。通过对整个方法的分析，我们会更清晰的知道ok内部是怎么实现通过设置拦截器来完成我们想要的功能的。同时也是我们学习责任链模式非常好的实践。后续文章将逐个分析ok内置拦截器的具体作用。</p>
+<h2 id="参考资料">参考资料</h2>
+<p><a href="https://blog.n0texpecterr0r.cn/?p=717">OkHttp 源码剖析系列（一）——请求的发起及拦截器机制概述</a></p>
+]]></content>
+    </entry>
+    <entry>
+        <title type="html"><![CDATA[再学Android:OkHttp源码探究(一)流程概述]]></title>
+        <id>https://alsowell.github.io//post/zai-xue-androidokhttp-yuan-ma-tan-jiu-yi-liu-cheng-gai-shu</id>
+        <link href="https://alsowell.github.io//post/zai-xue-androidokhttp-yuan-ma-tan-jiu-yi-liu-cheng-gai-shu">
+        </link>
+        <updated>2019-11-21T01:40:06.000Z</updated>
+        <content type="html"><![CDATA[<h4 id="写在前面">写在前面</h4>
+<p>本人从事Android开发工作几年，也算是见证了Android的技术变革。拿网络库来讲从最开始使用的xUtils到 <a href="https://github.com/google/volley">volley</a>然后到现在主流的<a href="https://github.com/square/okhttp">okhttp</a>。更不要说热更新、插件化、以及路由开发模式的大行其道。有感于工作中大多时候是仅限于使用,于是打算写一系列关于Android开发中使用到的框架解析，也算是对自己理解的一个记录。</p>
+<h4 id="正文">正文</h4>
+<p>网上看到一个观点：当我们想深入了解一个框架的时候，第一步是要会用，然后按照框架的流程图一步一步的去慢慢的探索分析。对于这个观点笔者是非常赞同的，优秀的框架都是有清晰的架构、核心思想也都采用了优秀的设计模式。下面我们从okhttp开始分析</p>
+<ul>
+<li>本系列文章基于okhttp4.2.2 (官方已使用kotlin进行重写)</li>
+</ul>
+<h3 id="发起一次简单的请求">发起一次简单的请求</h3>
+<p>任何框架的学习第一步都是从会用开始，下面我们开始使用OKHTTP构建一个简单的访问百度的请求。</p>
+<pre><code class="language-kotlin">   private fun makeCall() {
+        val okHttpClient = OkHttpClient.Builder()
+            .connectTimeout(10, TimeUnit.SECONDS)
+            .writeTimeout(10, TimeUnit.SECONDS)
+            .readTimeout(10, TimeUnit.SECONDS)
+            .build()
+        val request = Request.Builder()
+            .url(&quot;http://www.baidu.com&quot;)
+            .get()
+            .build()
         okHttpClient.newCall(request).enqueue(object : Callback {
             override fun onFailure(call: Call, e: IOException) {
             }
@@ -166,31 +741,18 @@
             override fun onResponse(call: Call, response: Response) {
             }
         })
+
+    }
 </code></pre>
-<p>  上面就是我们一般使用okhttp进行网络请求的简单写法。当然okhttp优秀的地方不是说能够帮我们封装好网络请求的内部逻辑，使我们能focus在业务上面。</p>
-<h3 id="step2request">Step2:Request</h3>
-<p>  我们从Request开始分析,当我们发起一次请求的时候客户端是怎么正确找到对应的服务器的呢？首先肯定是有一个host、然后对应的还有我们当前业务模块所属的下级域名。例如func/config这样的。当然实际上网络请求还有很多关于应用层、传输层的本文不做过多分析。</p>
-<pre><code class="language-kotlin">    val request = Request.Builder()
-            .url(&quot;http://www.baidu.com/xxx/xxx&quot;)
-            .addHeader(&quot;xxxx&quot;,&quot;xxx&quot;)
-            .get()
-            .build()
-</code></pre>
-<p>  上面是比较简单的构造一个Request请求时的写法，Requst是通过建造者模式声明，根据具体业务场景添加我们需要的一些参数。url参数不用多说为我们业务接口需要访问的接口，追溯进去源码会发现：</p>
-<table><tr ><td bgcolor=#f7f6f3 >
- 第一步:首先把web socket的请求替换为http的请求
- Silently replace web socket URLs with HTTP URLs.
- 第二步:通过调用HttpUrl类去进行Url自动替换掉换行等或者进行合法性的一些验证,如果一个请求的url没有以http开头会抛出Expected URL scheme 'http' or 'https' but was xxx的异常。同时通过HttpUrl内部的parse方法会解析出当前请求的一些参数并且记录下来
-</td></tr></table>
-<p>  addHeader其实就是把跟服务器约定好的一些参数填入进入，构造Request的时候也会声明会是一个什么请求。对应的还会有post、put、delete等方法。以上就是构造一个Request的方式。其实也是非常的简单。</p>
-<h3 id="step3okhttpclient">Step3:OkHttpClient</h3>
-<p>  说完了Request，我们再来分析一下OkHttpClient：字面意思非常好理解，okhttp的客户端。首先来看一下client的类注释。大概意思如下:</p>
-<table><tr><td bgcolor=#f7f6f3>
-&emsp;&emsp;使用的时候最好构建一个单例的client去复用到所有的网络请求，因为每个client都会持有它自己的连接池和线程池。复用线程池可以减少延迟并且可以减少内存的消耗，同时通过newBuilder()方法构造出来的client可以很方便的共享一些配置如：connectTimeOut等
+<p>可以看到我们首先构造一个okhttpClient出来并设置一些超时时间、通过request设置请求的域名和请求方法。最后通过enqueue异步、或者excute同步的方式去进行请求。请求结果会通过接口回调的方式返回。</p>
+<h4 id="okhttpclient">OkHttpClient</h4>
+<p>字面意思非常好理解，okhttp的客户端。首先来看一下client的类注释。大概意思如下:</p>
+<table><tr><td >
+使用的时候最好构建一个单例的client去复用到所有的网络请求，因为每个client都会持有它自己的连接池和线程池。复用连接池可以减少延迟并且可以减少内存的消耗，同时通过newBuilder()方法构造出来的client可以很方便的共享一些配置如：connectTimeOut等
 <br></br>
 Tips:看到上面的注释，网络优化角度为什么要复用连接池也就可以很明白的理解了。
 <td><tr></table>
-&emsp;&emsp;上面的示例我们发现真正在使用的时候需要我们设置的项并不多，但其实client在构造的时候是有很多参数可以设置。
+<p>okhttpclient是通过建造者模式构造出来，上面的示例我们发现真正在使用的时候需要我们设置的项并不多，但其实client在构造的时候是有很多参数可以设置。</p>
 <pre><code class="language-kotlin">    //异步请求什么时候执行的策略管理器
     internal var dispatcher: Dispatcher = Dispatcher()
     //管理http请求的连接来降低网络延迟的类
@@ -248,7 +810,243 @@ Tips:看到上面的注释，网络优化角度为什么要复用连接池也就
     //ping的间隔
     internal var pingInterval = 0
 </code></pre>
-<p>  从上面可以看出其实okhttp内部帮我们封装了很多可以修改的配置，参数一般有默认值，通过建造者模式我们可以选择性的设置我们想要的配置。okhttp也是我们学习这种设计模式的一个比较好的实践。</p>
+<p>从上面可以看出其实okhttp内部帮我们封装了很多可以修改的配置，参数一般有默认值，通过建造者模式我们可以选择性的设置我们想要的配置。okhttp也是我们学习这种设计模式的一个比较好的实践。</p>
+<p>构建client之后，我们会通过newCall方法传入一个Request 构造出一个Call.</p>
+<pre><code class="language-kotlin"> override fun newCall(request: Request): Call {
+    return RealCall.newRealCall(this, request, forWebSocket = false)
+  }
+</code></pre>
+<h4 id="request">Request</h4>
+<p>request字面意思就是请求的意思，那么一个请求会包含哪些信息呢？我们进去源码会发现其同样也是通过builder模式构建的。</p>
+<pre><code class="language-kotlin">    internal var url: HttpUrl? = null
+    internal var method: String
+    internal var headers: Headers.Builder
+    internal var body: RequestBody? = null
+</code></pre>
+<p>可以发现相对于client，request只有简单的几个参数。</p>
+<table>
+<thead>
+<tr>
+<th style="text-align:left">参数</th>
+<th style="text-align:center">说明</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align:left">url</td>
+<td style="text-align:center">代表此次请求的链接</td>
+</tr>
+<tr>
+<td style="text-align:left">method</td>
+<td style="text-align:center">代表当前请求的方法。如post、get、delete等</td>
+</tr>
+<tr>
+<td style="text-align:left">headers</td>
+<td style="text-align:center">一次请求中的头文件</td>
+</tr>
+<tr>
+<td style="text-align:left">body</td>
+<td style="text-align:center">请求体</td>
+</tr>
+</tbody>
+</table>
+<h4 id="call">Call</h4>
+<p>我们通过client.newCall()方法构造出来了一个call对象 。实际上是调用了RealCall.newRealCall(this, request, forWebSocket = false).第三个参数是代表不支持webSocket，因为本身是http请求。这点在构建request时HttpUrl类也会有相同的判断，直接把webSocket转换为http请求。具体的使用socket的场景在后续会进行分析。</p>
+<p>我们继续往下面看 newCall()方法到底做了什么事情:</p>
+<pre><code class="language-kotlin">  fun newRealCall(
+      client: OkHttpClient,
+      originalRequest: Request,
+      forWebSocket: Boolean
+    ): RealCall {
+      // Safely publish the Call instance to the EventListener.
+      return RealCall(client, originalRequest, forWebSocket).apply {
+        transmitter = Transmitter(client, this)
+      }
+    }
+</code></pre>
+<p>通过RealCall的构造方法实例出来一个realCall对象，字面意思可以知道后续的请求实际上是调用的realCall的对象。同时初始化了一个Transmitter。</p>
+<h4 id="transmitter">Transmitter</h4>
+<table><tr><td bgcolor=#f7f6f3>
+应用层和网络层之间的桥梁，对外暴露了像connections/requests/responses/streams 所以我们可以方便的拿到这些对象做操作。再结合拦截器的作用也就很好理解了
+</td></tr></table>
+<h4 id="请求流程">请求流程</h4>
+<p>我们知道okhttp是支持同步excute和异步enqueue的，那么内部究竟是怎么处理的呢？Android在某个版本之后已经不允许直接在主线程中进行网络请求了，所以我们这里直接分析异步请求的过程. 我们之前通过client.newCall已经构造出来Call对象。直接使用call.enqueue()就可以发起请求。Call定义的enqueue方法只是一个接口，具体实现是realCall中</p>
+<pre><code class="language-kotlin">  override fun enqueue(responseCallback: Callback) {
+    synchronized(this) {
+      //首先会进行防止重复请求的判断
+      check(!executed) { &quot;Already Executed&quot; }
+      executed = true
+    }
+   //追溯进去会发现这步是回调eventListener的callStart方法，前文在介绍okhttpclient的构造方法时有提到过
+    transmitter.callStart()
+    //这里是请求真正发起的地方 
+    client.dispatcher.enqueue(AsyncCall(responseCallback))
+  }
+</code></pre>
+<h5 id="dispatcher">Dispatcher</h5>
+<p>我们发现真正发起请求的地方是调用client里面的dispathcer对象执行enqueue方法，那dispatcher是什么鬼东东呢？我们继续来看注释：</p>
+<pre><code class="language-kotlin">Policy on when async requests are executed.
+用于管理异步请求什么时候执行的策略管理器
+Each dispatcher uses an [ExecutorService] to run calls internally. If you supply your own
+executor, it should be able to run [the configured maximum][maxRequests] number of calls concurrently.
+每个dispatcher本质上是使用ExecutorService来进行请求的调用。
+根据上面的注释我们还知道每个dispatcher其实是定义了一个最大请求并发数，默认是64
+</code></pre>
+<p>继续回到我们的主题:</p>
+<pre><code class="language-kotlin">internal fun enqueue(call: AsyncCall) {
+    synchronized(this) {
+      readyAsyncCalls.add(call)
+			
+      // Mutate the AsyncCall so that it shares the AtomicInteger of an existing running call to
+      // the same host.
+      if (!call.get().forWebSocket) {
+        val existingCall = findExistingCallWithHost(call.host())
+        if (existingCall != null) call.reuseCallsPerHostFrom(existingCall)
+      }
+    }
+    promoteAndExecute()
+  }
+</code></pre>
+<p>首先是使用了同步锁来保证线程同步,然后把当前请求对象添加到了一个ArrayDeque双端队列里。</p>
+<pre><code class="language-kotlin">  /** Ready async calls in the order they'll be run. */
+  private val readyAsyncCalls = ArrayDeque&lt;AsyncCall&gt;()
+
+  /** Running asynchronous calls. Includes canceled calls that haven't finished yet. */
+  private val runningAsyncCalls = ArrayDeque&lt;AsyncCall&gt;()
+
+  /** Running synchronous calls. Includes canceled calls that haven't finished yet. */
+  private val runningSyncCalls = ArrayDeque&lt;RealCall&gt;()
+</code></pre>
+<p>我们可以看到ok其实是定义了三个双端队列：</p>
+<ul>
+<li>异步请求等待队列</li>
+<li>异步请求执行队列</li>
+<li>同步请求执行队列</li>
+</ul>
+<p>首先执行的异步请求必须不是webSocket的类型才继续往下走，下一步是寻找是否存在相同host的请求。这里是通过原子类型来保证相同host的请求可以准确记录下来。接着调用promoteAndExecute()来进行请求；</p>
+<h5 id="promoteandexecute">promoteAndExecute</h5>
+<pre><code class="language-kotlin">private fun promoteAndExecute(): Boolean {
+  	//这里的写法很有意思，通过kotlin的assert来进行判断 不满足条件抛出一个异常，后续的开发其实可以借鉴。
+    assert(!Thread.holdsLock(this))
+  //构建一个空的AsyncCall list,AsyncCall 其实是自定义的runnable
+    val executableCalls = mutableListOf&lt;AsyncCall&gt;()
+    val isRunning: Boolean
+    synchronized(this) {
+      val i = readyAsyncCalls.iterator()
+      while (i.hasNext()) {
+        val asyncCall = i.next()
+
+        if (runningAsyncCalls.size &gt;= this.maxRequests) break // Max capacity.
+        if (asyncCall.callsPerHost().get() &gt;= this.maxRequestsPerHost) continue // Host max capacity.
+
+        i.remove()
+        asyncCall.callsPerHost().incrementAndGet()
+        executableCalls.add(asyncCall)
+        runningAsyncCalls.add(asyncCall)
+      }
+      isRunning = runningCallsCount() &gt; 0
+    }
+
+    for (i in 0 until executableCalls.size) {
+      val asyncCall = executableCalls[i]
+      asyncCall.executeOn(executorService)
+    }
+
+    return isRunning
+  }
+</code></pre>
+<p>大概总结一下这个方法做了什么事情:</p>
+<ul>
+<li>
+<p>从上文说的异步请求准备队列中通过迭代的方式取出请求任务</p>
+</li>
+<li>
+<p>判断并发请求是否超过最大数量</p>
+</li>
+<li>
+<p>往计数器中增加一次计数</p>
+</li>
+<li>
+<p>将call对象添加到executableCalls 以及 异步请求执行队列中</p>
+</li>
+<li>
+<p>循环从executableCalls 取出asyncCall对象调用executeOn()方法</p>
+</li>
+</ul>
+<h5 id="executeon">executeOn</h5>
+<pre><code class="language-kotlin">   fun executeOn(executorService: ExecutorService) {
+      assert(!Thread.holdsLock(client.dispatcher))
+      var success = false
+      try {
+        executorService.execute(this)
+        success = true
+      } catch (e: RejectedExecutionException) {
+        val ioException = InterruptedIOException(&quot;executor rejected&quot;)
+        ioException.initCause(e)
+        transmitter.noMoreExchanges(ioException)
+        responseCallback.onFailure(this@RealCall, ioException)
+      } finally {
+        if (!success) {
+          client.dispatcher.finished(this) // This call is no longer running!
+        }
+      }
+    }
+</code></pre>
+<p>分析到这里已经很明确了，executeOn方法是通过executorService的execute()方法来执行一次异步请求。如果请求中抛出异常那么会调用dispatcher的finish方法来结束本次请求。</p>
+<p>既然是通过异步执行，我们再来看一下run方法</p>
+<pre><code class="language-kotlin">   override fun run() {
+      threadName(&quot;OkHttp ${redactedUrl()}&quot;) {
+        var signalledCallback = false
+        transmitter.timeoutEnter()
+        try {
+          val response = getResponseWithInterceptorChain()
+          signalledCallback = true
+          responseCallback.onResponse(this@RealCall, response)
+        } catch (e: IOException) {
+          if (signalledCallback) {
+            // Do not signal the callback twice!
+            Platform.get().log(INFO, &quot;Callback failure for ${toLoggableString()}&quot;, e)
+          } else {
+            responseCallback.onFailure(this@RealCall, e)
+          }
+        } finally {
+          client.dispatcher.finished(this)
+        }
+      }
+    }
+</code></pre>
+<p>代码也同样很精简：</p>
+<ul>
+<li>
+<p>通过getResponseWithInterceptorChain()方法来获取请求的响应体（关于这个方法将在后续文章详细分析）</p>
+</li>
+<li>
+<p>通过接口回调将本次请求结果一层层回调给调用类</p>
+</li>
+</ul>
+<h4 id="总结">总结</h4>
+<p>以上基本上是客户端构建请求、发起请求、以及请求的整体流程。我们可以大概整理一下整个流程做了哪些关键的步骤：</p>
+<ul>
+<li>
+<p>客户端通过builder模式构建一个okHttpClient对象</p>
+</li>
+<li>
+<p>客户端通过builder模式构建一个Request对象</p>
+</li>
+<li>
+<p>通过okHttpClient.newCall(request:Request)方法来创建一个Call对象</p>
+</li>
+<li>
+<p>通过call.enqueue(callBack:CallBack)来发起一次异步请求</p>
+</li>
+<li>
+<p>请求时候是通过ExecutorService调用execute()方法来执行</p>
+</li>
+<li>
+<p>最终拿到响应体回调给客户端</p>
+</li>
+</ul>
+<p>当然真正请求的内部流程其实是要复杂的多，上面只是粗略的整理了一下，但是熟悉整个流程对于后面我们进入到okhttp核心代码分析的时候会更加有助于我们理解。以上就是okhttp源码分析的第一篇文章，后面会对每一步进行更详细的分析。</p>
 ]]></content>
     </entry>
     <entry>
