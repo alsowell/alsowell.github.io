@@ -2,7 +2,7 @@
 <feed xmlns="http://www.w3.org/2005/Atom">
     <id>https://alsowell.github.io/</id>
     <title>ALSOWELL`Blog</title>
-    <updated>2019-11-22T06:18:22.332Z</updated>
+    <updated>2019-11-22T09:42:54.990Z</updated>
     <generator>https://github.com/jpmonette/feed</generator>
     <link rel="alternate" href="https://alsowell.github.io/"/>
     <link rel="self" href="https://alsowell.github.io//atom.xml"/>
@@ -10,6 +10,162 @@
     <logo>https://alsowell.github.io//images/avatar.png</logo>
     <icon>https://alsowell.github.io//favicon.ico</icon>
     <rights>All rights reserved 2019, ALSOWELL`Blog</rights>
+    <entry>
+        <title type="html"><![CDATA[再学Android：OkHttp源码探究（五）CacheInterceptor]]></title>
+        <id>https://alsowell.github.io//post/zai-xue-androidokhttp-yuan-ma-tan-jiu-wu-cacheinterceptor</id>
+        <link href="https://alsowell.github.io//post/zai-xue-androidokhttp-yuan-ma-tan-jiu-wu-cacheinterceptor">
+        </link>
+        <updated>2019-11-22T09:42:38.000Z</updated>
+        <content type="html"><![CDATA[<h4 id="前言">前言</h4>
+<p>前面的文章我们分析了重试拦截器和BridgeInterceptor(用来处理header、设置gzip、user-agent等)。本篇文章将开始分析ok内置拦截器比较实用的缓存拦截器<strong>CacheInterceptor</strong>。</p>
+<p>顾名思义，CacheInterceptor就是处理与缓存相关的。关于http中的缓存知识可以参考<a href="https://www.cnblogs.com/chenqf/p/6386163.html">彻底弄懂HTTP缓存机制及原理</a>。这篇文章写得非常浅显易懂。</p>
+<h4 id="源码探究">源码探究</h4>
+<pre><code class="language-kotlin"> @Throws(IOException::class)
+  override fun intercept(chain: Interceptor.Chain): Response {
+    val cacheCandidate = cache?.get(chain.request())
+
+    val now = System.currentTimeMillis()
+
+    val strategy = CacheStrategy.Factory(now, chain.request(), cacheCandidate).compute()
+    val networkRequest = strategy.networkRequest
+    val cacheResponse = strategy.cacheResponse
+
+    cache?.trackResponse(strategy)
+
+    if (cacheCandidate != null &amp;&amp; cacheResponse == null) {
+      // The cache candidate wasn't applicable. Close it.
+      cacheCandidate.body?.closeQuietly()
+    }
+
+    // If we're forbidden from using the network and the cache is insufficient, fail.
+    if (networkRequest == null &amp;&amp; cacheResponse == null) {
+      return Response.Builder()
+          .request(chain.request())
+          .protocol(Protocol.HTTP_1_1)
+          .code(HTTP_GATEWAY_TIMEOUT)
+          .message(&quot;Unsatisfiable Request (only-if-cached)&quot;)
+          .body(EMPTY_RESPONSE)
+          .sentRequestAtMillis(-1L)
+          .receivedResponseAtMillis(System.currentTimeMillis())
+          .build()
+    }
+
+    // If we don't need the network, we're done.
+    if (networkRequest == null) {
+      return cacheResponse!!.newBuilder()
+          .cacheResponse(stripBody(cacheResponse))
+          .build()
+    }
+
+    var networkResponse: Response? = null
+    try {
+      networkResponse = chain.proceed(networkRequest)
+    } finally {
+      // If we're crashing on I/O or otherwise, don't leak the cache body.
+      if (networkResponse == null &amp;&amp; cacheCandidate != null) {
+        cacheCandidate.body?.closeQuietly()
+      }
+    }
+
+    // If we have a cache response too, then we're doing a conditional get.
+    if (cacheResponse != null) {
+      if (networkResponse?.code == HTTP_NOT_MODIFIED) {
+        val response = cacheResponse.newBuilder()
+            .headers(combine(cacheResponse.headers, networkResponse.headers))
+            .sentRequestAtMillis(networkResponse.sentRequestAtMillis)
+            .receivedResponseAtMillis(networkResponse.receivedResponseAtMillis)
+            .cacheResponse(stripBody(cacheResponse))
+            .networkResponse(stripBody(networkResponse))
+            .build()
+
+        networkResponse.body!!.close()
+
+        // Update the cache after combining headers but before stripping the
+        // Content-Encoding header (as performed by initContentStream()).
+        cache!!.trackConditionalCacheHit()
+        cache.update(cacheResponse, response)
+        return response
+      } else {
+        cacheResponse.body?.closeQuietly()
+      }
+    }
+
+    val response = networkResponse!!.newBuilder()
+        .cacheResponse(stripBody(cacheResponse))
+        .networkResponse(stripBody(networkResponse))
+        .build()
+
+    if (cache != null) {
+      if (response.promisesBody() &amp;&amp; CacheStrategy.isCacheable(response, networkRequest)) {
+        // Offer this request to the cache.
+        val cacheRequest = cache.put(response)
+        return cacheWritingResponse(cacheRequest, response)
+      }
+      
+      if (HttpMethod.invalidatesCache(networkRequest.method)) {
+        try {
+          cache.remove(networkRequest)
+        } catch (_: IOException) {
+          // The cache cannot be written.
+        }
+      }
+    }
+
+    return response
+  }
+
+</code></pre>
+<h5 id="request阶段">Request阶段</h5>
+<p>可以看到，首先是通过请求的url去缓存中读取，当然取出的缓存对象可能为空。主要方法:</p>
+<pre><code class="language-kotlin">   val cacheCandidate = cache?.get(chain.request())
+</code></pre>
+<p>那么Cache又是什么呢？还记得我们在分析OkHttpClient构造时候的cache参数吗？其实cache是ok内部实现的一个DiskLruCache。是不是很熟悉？也是三级缓存的原理。关于<a href="https://github.com/JakeWharton/DiskLruCache">DiskLruCache</a>,又是JakeWarton的一大杰作。多提一句，我们在构建client的时候可以通过builder模式设置我们想要缓存的文件夹以及最大缓存，下面放出代码。不过注意加好权限哦。</p>
+<pre><code class="language-kotlin">     val okHttpClient = OkHttpClient.Builder()
+            .connectTimeout(10, TimeUnit.SECONDS)
+            .writeTimeout(10, TimeUnit.SECONDS)
+            .readTimeout(10, TimeUnit.SECONDS)
+            .cache(Cache(Environment.getDownloadCacheDirectory(),10000))
+            .build()
+</code></pre>
+<p>接着是记录当前时间，他与从缓存取出的Response都是构建缓存策略的构造参数。说到缓存策略：</p>
+<pre><code class="language-kotlin"> val strategy = CacheStrategy.Factory(now, chain.request(), cacheCandidate).compute()
+</code></pre>
+<p>其实结合http中的缓存原理（见上文连接）就可以很简单的理解了，无非是根据请求参数和本地的缓存是否需要使用本地或者说两者结合。</p>
+<p>继续往下面看，根据networkRequest和cacheResponse 的值来判断后续流程。既然他们都是从CacheStrategy中拿到的，那我们先来了解下这两个家伙：</p>
+<pre><code class="language-kotlin"> /** The request to send on the network, or null if this call doesn't use the network. */
+ val networkRequest: Request?,
+ /** The cached response to return or validate; or null if this call doesn't use a cache. */
+ val cacheResponse: Response?
+</code></pre>
+<p>看了注释就非常好理解了，networkRequest在使用缓存的情况下为空，cahceRespoonse在没有使用缓存的情况下为空。<br>
+那么两个都为空的情况下就直接返回一个空的响应体，并且设置状态吗为504。</p>
+<p>使用缓存情况下，直接就返回缓存中存储的数据，这点在代码里可以体现：</p>
+<pre><code class="language-kotlin">// If we don't need the network, we're done.
+   if (networkRequest == null) {
+     return cacheResponse!!.newBuilder()
+         .cacheResponse(stripBody(cacheResponse))
+         .build()
+   }
+</code></pre>
+<p>那么如果我们不适用缓存呢？机智的你肯定会想起来拦截器的机制，没错就是继续通过chain.proceed方法调用下一个拦截器。既然本篇是关于缓存的，我们就继续看一下在使用缓存情况下是怎么处理response的。</p>
+<h5 id="response阶段">Response阶段</h5>
+<p>如果你看了上面关于HTTP缓存分析的文章，你会知道在http协议中，如果数据没有发生改变那么响应码将会是304。同样ok既然作为一个网络库也是遵守同样的规则的。</p>
+<p>在本地缓存不为空情况下，如果服务器返回304，那么ok将会更新header里面的一些参数，更新请求发起时间、响应接收时间等。在此之后返回networkResponse和cacheResponse结合之后的response。</p>
+<p>如果用户设置了自定义的缓存目录以及大小并且当前请求是可以被缓存的，那么调用put方法将响应存储到本地磁盘中。但是如果请求的方法是 patch、put、delete、move等不支持缓存的方法，会将缓存从磁盘中清楚。</p>
+<h4 id="总结">总结</h4>
+<p>以上就是CacheInterceptor的全部分析啦。我们大概类总结一下流程：</p>
+<ul>
+<li>首先通过请求的url通过DiskLruCache拿到可能存在的响应体</li>
+<li>通过请求时间和缓存中的响应体拿到缓存策略</li>
+<li>通过策略判断本次请求是直接读取缓存还是请求网络获取</li>
+<li>网络请求返回的数据更新到本地缓存中</li>
+</ul>
+<p>回头来看，其实缓存管理也是按照我们网络协议里面的规则，ok是基于这个规则对其进行了一定的封装。关键部分还是要充分的理解HTTP缓存机制，再次强烈推荐这篇<a href="https://www.cnblogs.com/chenqf/p/6386163.html">文章</a>。</p>
+<h4 id="参考资料">参考资料</h4>
+<p><a href="https://www.jianshu.com/p/963ad9ca214d">OKhttp源码学习（六）—— CacheInterceptor</a></p>
+<p><a href="https://www.cnblogs.com/chenqf/p/6386163.html">彻底弄懂HTTP缓存机制及原理</a></p>
+]]></content>
+    </entry>
     <entry>
         <title type="html"><![CDATA[再学Android：OkHttp源码探究（四）BridgeInterceptor]]></title>
         <id>https://alsowell.github.io//post/okhttp_two</id>
