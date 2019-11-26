@@ -1,0 +1,305 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" >
+
+<title>再学Android:OkHttp源码探究(七)CallServerInterceptor | ALSOWELL`Blog</title>
+<meta name="description" content="Never Stop">
+
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+
+<link rel="stylesheet" href="https://use.fontawesome.com/releases/v5.7.2/css/all.css" integrity="sha384-fnmOCqbTlWIlj8LyTjo7mOUStjsKC4pOpQbqyi7RrhN7udi9RwhKkMHpvLbHG9Sr" crossorigin="anonymous">
+<link rel="shortcut icon" href="https://alsowell.github.io//favicon.ico?v=1574736842142">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.10.0/katex.min.css">
+<link rel="stylesheet" href="https://alsowell.github.io//styles/main.css">
+
+
+
+<script src="https://cdn.jsdelivr.net/npm/vue/dist/vue.js"></script>
+<script src="https://cdn.bootcss.com/highlight.js/9.12.0/highlight.min.js"></script>
+
+<link rel="stylesheet" href="https://unpkg.com/aos@next/dist/aos.css" />
+
+
+
+  </head>
+  <body>
+    <div id="app" class="main">
+
+      <div class="sidebar" :class="{ 'full-height': menuVisible }">
+  <div class="top-container" data-aos="fade-right">
+    <div class="top-header-container">
+      <a class="site-title-container" href="https://alsowell.github.io/">
+        <img src="https://alsowell.github.io//images/avatar.png?v=1574736842142" class="site-logo">
+        <h1 class="site-title">ALSOWELL`Blog</h1>
+      </a>
+      <div class="menu-btn" @click="menuVisible = !menuVisible">
+        <div class="line"></div>
+      </div>
+    </div>
+    <div>
+      
+        
+          <a href="/" class="site-nav">
+            首页
+          </a>
+        
+      
+        
+          <a href="/archives" class="site-nav">
+            归档
+          </a>
+        
+      
+        
+          <a href="/tags" class="site-nav">
+            标签
+          </a>
+        
+      
+        
+          <a href="/post/about" class="site-nav">
+            关于
+          </a>
+        
+      
+    </div>
+  </div>
+  <div class="bottom-container" data-aos="flip-up" data-aos-offset="0">
+    <div class="social-container">
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    </div>
+    <div class="site-description">
+      Never Stop
+    </div>
+    <div class="site-footer">
+      Powered by <a href="https://github.com/getgridea/gridea" target="_blank">Gridea</a> | <a class="rss" href="https://alsowell.github.io//atom.xml" target="_blank">RSS</a>
+    </div>
+  </div>
+</div>
+
+
+      <div class="main-container">
+        <div class="content-container" data-aos="fade-up">
+          <div class="post-detail">
+            <h2 class="post-title">再学Android:OkHttp源码探究(七)CallServerInterceptor</h2>
+            <div class="post-date">2019-11-26</div>
+            
+            <div class="post-content">
+              <h4 id="前言">前言</h4>
+<p>终于！我们来到了ok内置五大拦截器最后一个拦截器的探究。关于这个拦截器我们直接来看一下源码的注释:</p>
+<table><tr><td>
+This is the last interceptor in the chain. It makes a network call to the server.
+</td></tr></table>
+<p>看到这里是不是有种拨开云雾见明月的感觉。话不多说我们继续先看下源码:</p>
+<pre><code class="language-kotlin">
+  @Throws(IOException::class)
+  override fun intercept(chain: Interceptor.Chain): Response {
+    val realChain = chain as RealInterceptorChain
+    val exchange = realChain.exchange()
+    val request = realChain.request()
+    val requestBody = request.body
+    val sentRequestMillis = System.currentTimeMillis()
+
+    exchange.writeRequestHeaders(request)
+
+    var responseHeadersStarted = false
+    var responseBuilder: Response.Builder? = null
+    if (HttpMethod.permitsRequestBody(request.method) &amp;&amp; requestBody != null) {
+      // If there's a &quot;Expect: 100-continue&quot; header on the request, wait for a &quot;HTTP/1.1 100
+      // Continue&quot; response before transmitting the request body. If we don't get that, return
+      // what we did get (such as a 4xx response) without ever transmitting the request body.
+      if (&quot;100-continue&quot;.equals(request.header(&quot;Expect&quot;), ignoreCase = true)) {
+        exchange.flushRequest()
+        responseHeadersStarted = true
+        exchange.responseHeadersStart()
+        responseBuilder = exchange.readResponseHeaders(true)
+      }
+      if (responseBuilder == null) {
+        if (requestBody.isDuplex()) {
+          // Prepare a duplex body so that the application can send a request body later.
+          exchange.flushRequest()
+          val bufferedRequestBody = exchange.createRequestBody(request, true).buffer()
+          requestBody.writeTo(bufferedRequestBody)
+        } else {
+          // Write the request body if the &quot;Expect: 100-continue&quot; expectation was met.
+          val bufferedRequestBody = exchange.createRequestBody(request, false).buffer()
+          requestBody.writeTo(bufferedRequestBody)
+          bufferedRequestBody.close()
+        }
+      } else {
+        exchange.noRequestBody()
+        if (!exchange.connection()!!.isMultiplexed) {
+          // If the &quot;Expect: 100-continue&quot; expectation wasn't met, prevent the HTTP/1 connection
+          // from being reused. Otherwise we're still obligated to transmit the request body to
+          // leave the connection in a consistent state.
+          exchange.noNewExchangesOnConnection()
+        }
+      }
+    } else {
+      exchange.noRequestBody()
+    }
+
+    if (requestBody == null || !requestBody.isDuplex()) {
+      exchange.finishRequest()
+    }
+    if (!responseHeadersStarted) {
+      exchange.responseHeadersStart()
+    }
+    if (responseBuilder == null) {
+      responseBuilder = exchange.readResponseHeaders(false)!!
+    }
+    var response = responseBuilder
+        .request(request)
+        .handshake(exchange.connection()!!.handshake())
+        .sentRequestAtMillis(sentRequestMillis)
+        .receivedResponseAtMillis(System.currentTimeMillis())
+        .build()
+    var code = response.code
+    if (code == 100) {
+      // server sent a 100-continue even though we did not request one.
+      // try again to read the actual response
+      response = exchange.readResponseHeaders(false)!!
+          .request(request)
+          .handshake(exchange.connection()!!.handshake())
+          .sentRequestAtMillis(sentRequestMillis)
+          .receivedResponseAtMillis(System.currentTimeMillis())
+          .build()
+      code = response.code
+    }
+
+    exchange.responseHeadersEnd(response)
+
+    response = if (forWebSocket &amp;&amp; code == 101) {
+      // Connection is upgrading, but we need to ensure interceptors see a non-null response body.
+      response.newBuilder()
+          .body(EMPTY_RESPONSE)
+          .build()
+    } else {
+      response.newBuilder()
+          .body(exchange.openResponseBody(response))
+          .build()
+    }
+    if (&quot;close&quot;.equals(response.request.header(&quot;Connection&quot;), ignoreCase = true) ||
+        &quot;close&quot;.equals(response.header(&quot;Connection&quot;), ignoreCase = true)) {
+      exchange.noNewExchangesOnConnection()
+    }
+    if ((code == 204 || code == 205) &amp;&amp; response.body?.contentLength() ?: -1L &gt; 0L) {
+      throw ProtocolException(
+          &quot;HTTP $code had non-zero Content-Length: ${response.body?.contentLength()}&quot;)
+    }
+    return response
+  }
+  
+</code></pre>
+<h4 id="流程分析">流程分析</h4>
+<p>是不是感觉臭长臭长的，但是莫慌！我们来一点一点攻克它。<br>
+我们先来看下面几行代码</p>
+<pre><code class="language-kotlin">    val realChain = chain as RealInterceptorChain
+    val exchange = realChain.exchange()
+    val request = realChain.request()
+    val requestBody = request.body
+    val sentRequestMillis = System.currentTimeMillis()
+
+</code></pre>
+<p>这里几行基本上取出对应的参数，并且设置当前时间为请求发出时间。关键的是从realChain中取出Exchange对象，这个对象是后续操作的比较关键的，之前在connectInterceptor中构建出来并且传递到当前的。</p>
+<p>接着网下看:通过 exchange.writeRequestHeaders(request)方法来开始写入请求头，接着根据请求方式和请求体是否为空来进入分支逻辑:</p>
+<h4 id="请求体不为空主要针对post请求br">请求体不为空(主要针对POST请求)<br></h4>
+<h5 id="100-continue">100-continue</h5>
+<p>刚开始看到这里笔者也是有点懵逼的，这是什么鬼header。于是开始Google大法:</p>
+<table>
+<tr>
+<td bgcolor="#f7f6f3">
+http 100-continue用于客户端在发送POST数据给服务器前，征询服务器情况，看服务器是否处理POST的数据，如果不处理，客户端则不上传POST数据，如果处理，则POST上传数据。在现实应用中，通常在POST大数据时，才会使用100-continue协议。<br>
+来源:https://zhuanlan.zhihu.com/p/30830041
+</td>
+</tr>
+</table>
+<p>接着就是读取响应头，同时通知eventListener响应头开始读取。我们看源码的调用链是调用ExchangeCodec的readResponseHeaders()方法来读取响应头，具体类似于BridgeInterceptor中的intercept方法。</p>
+<p>紧接着根据responseBuilder是否为null来进入分支逻辑，这个responseBuilder是根据又是根据header中的Expect是否为<strong>100-continue</strong>来判断的。接下来就是比较简单了，根据request构建出来一个requesBody，并且把其写入到请求的body中。</p>
+<h4 id="请求体为空">请求体为空</h4>
+<p>请求体为null的情况下就比较简单了直接调用noRequestBody()方法。表示当前request阶段已经完成.</p>
+<h4 id="response阶段">Response阶段</h4>
+<p>我们知道请求响应的开始也是从读取header。在上面经过发起Request结束之后，ok就已经做好准备进行response的接收。同样事件的发生也是会回调eventListener对应的监听。</p>
+<pre><code class="language-kotlin">    var response = responseBuilder
+        .request(request)
+        .handshake(exchange.connection()!!.handshake())
+        .sentRequestAtMillis(sentRequestMillis)
+        .receivedResponseAtMillis(System.currentTimeMillis())
+        .build()
+</code></pre>
+<p>可以看到经过一系列操作，我们已经拿到了服务器的返回。最终就是通过:</p>
+<pre><code class="language-kotlin"> response.newBuilder()
+          .body(exchange.openResponseBody(response))
+          .build()
+</code></pre>
+<p>这个方法来将服务端解析为客户端真正可用的resonse。</p>
+<h4 id="总结">总结</h4>
+<p>CallServerInterceptor的流程解析基本上到这里就结束了。纵观ok内置几个拦截器的源码，其实都不是很复杂，内部是采用了优秀的设计模式将以此请求中的每个阶段都做了分层，然后采用递归调用的思想通过几个拦截器将一个请求由上而下、再由下而上的完成。其中的设计模式以及代码的分离都是非常值得我们来学习的。</p>
+<p>基本上关于拦截器的分析到这里就告一段了。整个流程下来笔者对于ok内部的很多东西也是一笔带过，后续将会好机会再详细分析。通过对ok一次请求的整体流程的探究，深知<strong>纸上得来终觉浅，绝知此事要躬行</strong>，这句话也跟大家一起共勉。</p>
+
+            </div>
+            
+              <div class="tag-container">
+                
+                  <a href="https://alsowell.github.io//tag/HeX_Wnc6P" class="tag">
+                    okhttp
+                  </a>
+                
+                  <a href="https://alsowell.github.io//tag/android" class="tag">
+                    Android
+                  </a>
+                
+              </div>
+            
+            
+              <div class="next-post">
+                <div class="next">下一篇</div>
+                <a href="https://alsowell.github.io//post/zai-xue-androidokhttp-yuan-ma-tan-jiu-liu-connectinterceptor">
+                  <h3 class="post-title">
+                    再学Android：OkHttp源码探究（六）ConnectInterceptor
+                  </h3>
+                </a>
+              </div>
+            
+
+            
+
+          </div>
+
+        </div>
+      </div>
+    </div>
+
+    <script src="https://unpkg.com/aos@next/dist/aos.js"></script>
+
+<script type="application/javascript">
+
+AOS.init();
+
+hljs.initHighlightingOnLoad()
+
+var app = new Vue({
+  el: '#app',
+  data: {
+    menuVisible: false,
+  },
+})
+
+</script>
+
+
+
+
+  </body>
+</html>
