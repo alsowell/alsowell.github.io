@@ -3,13 +3,13 @@
   <head>
     <meta charset="utf-8" >
 
-<title>面试官问系列 | ALSOWELL`Blog</title>
+<title>面试官问：volatile和synchronized都介绍下，他们之间有什么 不同呢？ | ALSOWELL`Blog</title>
 <meta name="description" content="Never Stop">
 
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
 
 <link rel="stylesheet" href="https://use.fontawesome.com/releases/v5.7.2/css/all.css" integrity="sha384-fnmOCqbTlWIlj8LyTjo7mOUStjsKC4pOpQbqyi7RrhN7udi9RwhKkMHpvLbHG9Sr" crossorigin="anonymous">
-<link rel="shortcut icon" href="https://alsowell.github.io//favicon.ico?v=1575281396361">
+<link rel="shortcut icon" href="https://alsowell.github.io//favicon.ico?v=1575430596517">
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.10.0/katex.min.css">
 <link rel="stylesheet" href="https://alsowell.github.io//styles/main.css">
 
@@ -30,7 +30,7 @@
   <div class="top-container" data-aos="fade-right">
     <div class="top-header-container">
       <a class="site-title-container" href="https://alsowell.github.io/">
-        <img src="https://alsowell.github.io//images/avatar.png?v=1575281396361" class="site-logo">
+        <img src="https://alsowell.github.io//images/avatar.png?v=1575430596517" class="site-logo">
         <h1 class="site-title">ALSOWELL`Blog</h1>
       </a>
       <div class="menu-btn" @click="menuVisible = !menuVisible">
@@ -92,7 +92,7 @@
       <div class="main-container">
         <div class="content-container" data-aos="fade-up">
           <div class="post-detail">
-            <h2 class="post-title">面试官问系列</h2>
+            <h2 class="post-title">面试官问：volatile和synchronized都介绍下，他们之间有什么 不同呢？</h2>
             <div class="post-date">2019-12-01</div>
             
             <div class="post-content">
@@ -102,16 +102,100 @@
 <a href="https://www.hollischuang.com/archives/2648">深入理解Java中的volatile关键字</a></li>
 <li>概述:
 <ul>
-<li>volatile修饰的变量遵守<code>缓存一致性</code>。
+<li>
+<p>volatile修饰的变量遵守<code>缓存一致性</code>。</p>
 <ul>
 <li>可见性
 <ul>
 <li>某个线程修改过这个值，其值都会被强制刷新到主内存。保证了被<code>volatile</code>修饰过的变量在并发编程中在多个缓存中是可见的。</li>
 </ul>
 </li>
-<li>
-<h2 id="有序性">有序性</h2>
+<li>有序性
+<ul>
+<li>即指程序执行的顺序按照代码的先后顺序执行
+<ul>
+<li>sample:由于处理器优化和指令重排等，CPU还可能对输入代码进行乱序执行，比如load-&gt;add-&gt;save 有可能被优化成load-&gt;save-&gt;add 。这就是可能存在有序性问题。</li>
+<li>但是<code>volatile</code>除了可以保证数据的有序性之外，可以进制指令重排优化。</li>
+</ul>
 </li>
+</ul>
+</li>
+<li>原子性
+<ul>
+<li>原子性是指一个操作是不可中断的，要么全部执行完成。
+<ul>
+<li>线程是cpu调度的基本单位，CPU有时间片的概念，会按照不同的调度算法进行线程调度。当一个线程获得时间片之后开始执行，在时间片耗尽之后，就会失去CPU使用权。所以在多线程场景下，由于时间片在线程间轮换，就会发生原子性问题。</li>
+</ul>
+</li>
+<li><code>volatile</code>是不能保证原子性的。</li>
+<li>使用<code>volatile</code>的场景
+<ul>
+<li>运算结果并不一依赖变量的当前值，或者能过确保只有单一的线程会修改变量的值</li>
+<li>变量不需要与其他状态变量共同参与不变约束</li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+</li>
+<li>
+<p>synchronized</p>
+<ul>
+<li>synchonized 可以保证 可见性、有序性、原子性。<code>volatile</code>只能保证可见性、有序性 无法保证原子性。</li>
+<li><code>synchronized</code>是无法进制指令重排和处理器优化的。
+<ul>
+<li>Java程序中的天然有序性可以总结为一句话：在本线程内观察，所有操作都是有序性的。在另外一个线程观察其他线程，所有的操作都是无顺序的。
+<ul>
+<li><code>synchronized</code>的有序性是多个线程之间的有序性，即加锁的方法需要按照多个线程的调用顺序执行。但是内部的同步代码还是需要被指令优化并且可能发生重排。</li>
+</ul>
+</li>
+</ul>
+</li>
+<li>主要有两种用法：同步方法和同步代码块
+<ul>
+<li>同步方法:被其修饰的方法，在同一时间只能被单个线程访问</li>
+<li>同步代码块:可以减少锁的粒度
+<ul>
+<li>sample：如果一个方法被<code>synchronized</code>修饰，内部有一个长时间执行的任务，A线程调用方法，那么B线程必须等待很久的时间去才去执行。</li>
+<li>关于同步代码块this方法。<code>synchronized</code>可以使用任意对象来标记同步，但是如果一个类中很多个<code>synchronized</code>方法。都是使用this来作为锁，那么就会造成阻塞。一个类中如果有多个同步代码块方法，一般使用不同的对象来作为锁。</li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+</li>
+<li>
+<p>思考问题：为什么有了<code>synchronized</code>之后还要有<code>volatile</code>这个关键字？</p>
+<ul>
+<li>产生损耗
+<ul>
+<li>使用<code>synchronized</code>会有性能损耗，无论是同步方法还是同步代码块，都会有加锁，解锁的操作。此过程会有性能损耗的。</li>
+</ul>
+</li>
+<li>产生阻塞
+<ul>
+<li><code>syncronized</code>在多线程访问场景下，某个线程访问时候会阻塞其他线程等待此线程执行完毕。而<code>volatile</code>是jvm提供的轻量级线程同步机制，其不会产生阻塞和性能损耗相当于基本对象赋值。</li>
+</ul>
+</li>
+<li><code>volatile</code>可以避免指令重新排序是其附加有点。以<strong>单例的双重检查</strong>举例</li>
+</ul>
+<pre><code class="language-java">public class Singleton{
+    private volatile static Singleton singleton;
+    private Singleton {}
+    public static Singleton getSingleton(){
+        if(singleton==null){
+            synchronized(Singleton.class){
+                if(singleton==null){
+                    singleton=new Singleton();
+                }
+            }
+        }
+        return singleton;
+    }
+}
+</code></pre>
+<ul>
+<li>说明：如果仅仅使用<code>synchronized</code>，那么假如两个线程A、B同时访问此方法获取单例，A线程访问此时singleton为null开始进行初始化，此时还没有进行初始化完成。此时B线程开始访问，进入判断singleton==null 可能返回false。那么B线程拿到的线程就可能是一个空对象。</li>
 </ul>
 </li>
 </ul>
