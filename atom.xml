@@ -2,7 +2,7 @@
 <feed xmlns="http://www.w3.org/2005/Atom">
     <id>https://alsowell.github.io/</id>
     <title>ALSOWELL`Blog</title>
-    <updated>2019-12-05T13:44:53.056Z</updated>
+    <updated>2019-12-08T06:41:05.611Z</updated>
     <generator>https://github.com/jpmonette/feed</generator>
     <link rel="alternate" href="https://alsowell.github.io/"/>
     <link rel="self" href="https://alsowell.github.io//atom.xml"/>
@@ -10,119 +10,6 @@
     <logo>https://alsowell.github.io//images/avatar.png</logo>
     <icon>https://alsowell.github.io//favicon.ico</icon>
     <rights>All rights reserved 2019, ALSOWELL`Blog</rights>
-    <entry>
-        <title type="html"><![CDATA[面试官问：volatile和synchronized都介绍下，他们之间有什么 不同呢？]]></title>
-        <id>https://alsowell.github.io//post/mian-shi-guan-wen-xi-lie</id>
-        <link href="https://alsowell.github.io//post/mian-shi-guan-wen-xi-lie">
-        </link>
-        <updated>2019-12-01T08:54:13.000Z</updated>
-        <content type="html"><![CDATA[<h4 id="知道volatile与synchronized的区别吗">知道volatile与synchronized的区别吗？</h4>
-<ul>
-<li>分析文章: <a href="https://juejin.im/post/5ae134e76fb9a07acb3c8ea7">volatile与synchronized的区别</a><br><br>
-<a href="https://www.hollischuang.com/archives/2648">深入理解Java中的volatile关键字</a></li>
-<li>概述:
-<ul>
-<li>
-<p>volatile修饰的变量遵守<code>缓存一致性</code>。</p>
-<ul>
-<li>可见性
-<ul>
-<li>某个线程修改过这个值，其值都会被强制刷新到主内存。保证了被<code>volatile</code>修饰过的变量在并发编程中在多个缓存中是可见的。</li>
-</ul>
-</li>
-<li>有序性
-<ul>
-<li>即指程序执行的顺序按照代码的先后顺序执行
-<ul>
-<li>sample:由于处理器优化和指令重排等，CPU还可能对输入代码进行乱序执行，比如load-&gt;add-&gt;save 有可能被优化成load-&gt;save-&gt;add 。这就是可能存在有序性问题。</li>
-<li>但是<code>volatile</code>除了可以保证数据的有序性之外，可以进制指令重排优化。</li>
-</ul>
-</li>
-</ul>
-</li>
-<li>原子性
-<ul>
-<li>原子性是指一个操作是不可中断的，要么全部执行完成。
-<ul>
-<li>线程是cpu调度的基本单位，CPU有时间片的概念，会按照不同的调度算法进行线程调度。当一个线程获得时间片之后开始执行，在时间片耗尽之后，就会失去CPU使用权。所以在多线程场景下，由于时间片在线程间轮换，就会发生原子性问题。</li>
-</ul>
-</li>
-<li><code>volatile</code>是不能保证原子性的。</li>
-<li>使用<code>volatile</code>的场景
-<ul>
-<li>运算结果并不一依赖变量的当前值，或者能过确保只有单一的线程会修改变量的值</li>
-<li>变量不需要与其他状态变量共同参与不变约束</li>
-</ul>
-</li>
-</ul>
-</li>
-</ul>
-</li>
-<li>
-<p>synchronized</p>
-<ul>
-<li>synchonized 可以保证 可见性、有序性、原子性。<code>volatile</code>只能保证可见性、有序性 无法保证原子性。</li>
-<li><code>synchronized</code>是无法进制指令重排和处理器优化的。
-<ul>
-<li>Java程序中的天然有序性可以总结为一句话：在本线程内观察，所有操作都是有序性的。在另外一个线程观察其他线程，所有的操作都是无顺序的。
-<ul>
-<li><code>synchronized</code>的有序性是多个线程之间的有序性，即加锁的方法需要按照多个线程的调用顺序执行。但是内部的同步代码还是需要被指令优化并且可能发生重排。</li>
-</ul>
-</li>
-</ul>
-</li>
-<li>主要有两种用法：同步方法和同步代码块
-<ul>
-<li>同步方法:被其修饰的方法，在同一时间只能被单个线程访问</li>
-<li>同步代码块:可以减少锁的粒度
-<ul>
-<li>sample：如果一个方法被<code>synchronized</code>修饰，内部有一个长时间执行的任务，A线程调用方法，那么B线程必须等待很久的时间去才去执行。</li>
-<li>关于同步代码块this方法。<code>synchronized</code>可以使用任意对象来标记同步，但是如果一个类中很多个<code>synchronized</code>方法。都是使用this来作为锁，那么就会造成阻塞。一个类中如果有多个同步代码块方法，一般使用不同的对象来作为锁。</li>
-</ul>
-</li>
-</ul>
-</li>
-</ul>
-</li>
-<li>
-<p>思考问题：为什么有了<code>synchronized</code>之后还要有<code>volatile</code>这个关键字？</p>
-<ul>
-<li>产生损耗
-<ul>
-<li>使用<code>synchronized</code>会有性能损耗，无论是同步方法还是同步代码块，都会有加锁，解锁的操作。此过程会有性能损耗的。</li>
-</ul>
-</li>
-<li>产生阻塞
-<ul>
-<li><code>syncronized</code>在多线程访问场景下，某个线程访问时候会阻塞其他线程等待此线程执行完毕。而<code>volatile</code>是jvm提供的轻量级线程同步机制，其不会产生阻塞和性能损耗相当于基本对象赋值。</li>
-</ul>
-</li>
-<li><code>volatile</code>可以避免指令重新排序是其附加有点。以<strong>单例的双重检查</strong>举例</li>
-</ul>
-<pre><code class="language-java">public class Singleton{
-    private volatile static Singleton singleton;
-    private Singleton {}
-    public static Singleton getSingleton(){
-        if(singleton==null){
-            synchronized(Singleton.class){
-                if(singleton==null){
-                    singleton=new Singleton();
-                }
-            }
-        }
-        return singleton;
-    }
-}
-</code></pre>
-<ul>
-<li>说明：如果仅仅使用<code>synchronized</code>，那么假如两个线程A、B同时访问此方法获取单例，A线程访问此时singleton为null开始进行初始化，此时还没有进行初始化完成。此时B线程开始访问，进入判断singleton==null 可能返回false。那么B线程拿到的线程就可能是一个空对象。</li>
-</ul>
-</li>
-</ul>
-</li>
-</ul>
-]]></content>
-    </entry>
     <entry>
         <title type="html"><![CDATA[再学Android：EventBus源码探究]]></title>
         <id>https://alsowell.github.io//post/zai-xue-androideventbus-yuan-ma-tan-jiu</id>
@@ -2630,6 +2517,65 @@ executor, it should be able to run [the configured maximum][maxRequests] number 
 </li>
 </ul>
 <p>当然真正请求的内部流程其实是要复杂的多，上面只是粗略的整理了一下，但是熟悉整个流程对于后面我们进入到okhttp核心代码分析的时候会更加有助于我们理解。以上就是okhttp源码分析的第一篇文章，后面会对每一步进行更详细的分析。</p>
+]]></content>
+    </entry>
+    <entry>
+        <title type="html"><![CDATA[Android开发板上TeamViewer的自动绑定]]></title>
+        <id>https://alsowell.github.io//post/teamviewer-auto-bind</id>
+        <link href="https://alsowell.github.io//post/teamviewer-auto-bind">
+        </link>
+        <updated>2019-11-05T01:44:52.000Z</updated>
+        <summary type="html"><![CDATA[<h3 id="背景">背景</h3>
+<p>  笔者目前从事的项目是线下无人值守的智能终端设备的开发，因此远程功能对异常调试以及异常恢复至关重要。固件经过修改出厂时就已经把teamviewer打入其中，且开发者可以获得root权限。正常流程出厂前会有人员将当前机器的远程绑定到公司账户下。但是如果固件经过恢复出厂设置的操作的话，那么远程就需要重新绑定，所以远程的自动绑定就特别重要。</p>
+]]></summary>
+        <content type="html"><![CDATA[<h3 id="背景">背景</h3>
+<p>  笔者目前从事的项目是线下无人值守的智能终端设备的开发，因此远程功能对异常调试以及异常恢复至关重要。固件经过修改出厂时就已经把teamviewer打入其中，且开发者可以获得root权限。正常流程出厂前会有人员将当前机器的远程绑定到公司账户下。但是如果固件经过恢复出厂设置的操作的话，那么远程就需要重新绑定，所以远程的自动绑定就特别重要。</p>
+<!-- more -->
+<p>  正常面对这种需求当然首先去找官方文档，但是翻遍Teamviewer提供的api接口也没有找到相关的实现;没办法只好拨打官方提供的技术支持电话进行咨询，经过了无数次的等待终于接通，但是技术人员的回复是不提供这个功能。</p>
+<p>  在官方支持无果的情况下，笔者只好寻找其他的解决思路，通常面对这种问题第一个解决思路是通过抓包去分析绑定流程的数据传输进行解决。拿到所属账户的用户id以及设置的唯一标识：AndroidID去进行模拟绑定。</p>
+<p>调起应用：</p>
+<figure data-type="image" tabindex="1"><img src="https://alsowell.github.io//post-images/1572922168223.jpg" alt=""></figure>
+<p>点击分配：</p>
+<figure data-type="image" tabindex="2"><img src="https://alsowell.github.io//post-images/1572922822275.jpg" alt=""></figure>
+<p>分配成功:</p>
+<figure data-type="image" tabindex="3"><img src="https://alsowell.github.io//post-images/1572922885806.jpg" alt=""></figure>
+<p>  注：笔者公司绑定TeamViewer的方式为通过打开teamviewer分配的固定的url链接通过浏览器调起Teamviewer应用进行绑定。</p>
+<p>  通过抓包可以发现绑定时候去先获取当前机器所属的账户组，然后点击分配按钮时通过获取当前机器的信息去服务器进行当前账户的分配。分配成功后会返回当前机器的远程id和连接时候的密码。<br>
+分析到这里好像已经解决了我们的需求。但是理想很丰满，现实很骨感。一顿骚操作以后发现模拟数据去请求后台也并不能在后台显示这台绑定的设备，这种方法宣告失败。</p>
+<p>  我们再回头分析一下,Teamviewer内部的绑定并不是透明的，我们仅仅通过抓包的数据去进行hook好像并不代表它内部的所有流程。可能在进行网络请求后还进行了其他的操作，但是我们并不能知道。分析到这里下一步好像应该去做反编译去获取到它内部的流程操作。但是笔者再一顿骚操作后发现其内部进行了混淆，并且之前对反编译也没有什么研究，那么这种解决思路暂时先放一放。</p>
+<p>  我们再分析一下正常绑定的流程，手动打开一个链接-&gt;通过浏览器调起应用-&gt;点击应用内的分配按钮-&gt;分配成功。整个过程关键的一步是手动点击按钮去实现。机智的你可能已经知道我们下一步的思路是通过模拟点击去进行自动绑定的实现。</p>
+<p>  但是模拟点击的实现有个问题，我们不可能每次开机以后都去进行一次模拟点击的操作，在已经绑定的情况下再去做重复的点击无疑是多此一举。那么就需要去分析是否已经绑定过，正常的思路有两个：</p>
+<ul>
+<li>通过api去获取当前机器是否已经绑定</li>
+<li>本地是否有数据记录是否绑定</li>
+</ul>
+<p>  毫无疑问去分析本地数据会更快一点，再结合之前说到的情况：机器恢复出厂设置的情况下已经绑定的远程会失效。那么我们可以分析得知本地肯定会存储一些必要的数据。那我们直接去data/data 里面去找一下。找了半天，终于在/data/data/com.teamviewer.host.market/files/global.conf路径下面发现了点东西。</p>
+<figure data-type="image" tabindex="4"><img src="https://alsowell.github.io//post-images/1572931170363.jpg" alt=""></figure>
+<!-- more -->
+<p>  可以发现OwningManagerAccountName和OwningManagerCompanyName表示当前所属账户信息的。在没有绑定的情况下这两个字段是不存在的。那么问题就解决了。在每次开机时通过判断这两个字段是否去需要绑定。<br>
+  是否绑定的问题已经解决了，那么接下来就到了重点。上面的流程分析提到：显示弹窗-&gt;点击弹窗——&gt;绑定完成。首先是判断是否已经进入到绑定的承载界面:</p>
+<pre><code class="language-kotlin">    private fun getTopService(): Boolean {
+        val exec = Shell(true).exec(&quot;dumpsys activity | grep  mFocusedActivity&quot;)
+        return exec.message.contains(&quot;com.teamviewer.host.ui.HostActivity&quot;)
+    }
+</code></pre>
+<h3 id="判断弹窗">判断弹窗</h3>
+<p>  通过获取位于栈顶的进程来判断是否浏览器成功调起应用，然后是判断弹窗是否显示以及按钮的位置，方法比较多：1.我们知道Android的窗口都是通过WinddowManager来管理的，WindowManager是一种方式；<br>
+2.另外一种方法是通过uiautomatorviewer来获取。这里着重讲一下uiautomatorviewer的方式。平常在开发过程中我们经常会使用Android sdk tools下面的uiautomatorviewer来获取当前屏幕正在显示的View层级关系以及所属位置。<br>
+<img src="https://alsowell.github.io//post-images/1572934681994.jpg" alt=""><br>
+<img src="https://alsowell.github.io//post-images/1572934977185.jpg" alt=""></p>
+<p>  同样的我们可以直接在Android 的shell环境下直接执行</p>
+<pre><code class="language-kotlin"> Shell(true).exec(&quot;uiautomator dump&quot;)
+</code></pre>
+<p>  执行这个命令，会直接在sdcard下生成一个window_dump.xml文件。我们通过解析xml分析出来当前是否处于弹窗状态以及需要模拟点击的按钮位置。</p>
+<h3 id="模拟点击">模拟点击</h3>
+<p>  说到模拟点击，你脑子里第一个想到的是什么？大多数情况下可能想到的都是AccessibilityService。AccessibilityService根据官方的介绍，是指开发者通过增加类似contentDescription的属性，从而在不修改代码的情况下，让残障人士能够获得使用体验的优化，大家可以打开AccessibilityService来试一下，点击区域，可以有语音或者触摸的提示，帮助残障人士使用App（这段介绍是我抄的）。但是AccessibilityService使用的前提是需要用户手动授权，Android默认是关闭的，对于笔者的业务场景是无法满足需求的。</p>
+<p>  那可以考虑另外一种思路，直接输入input事件。我们在平常开发中经常会用到adb shell input tap xx xx 来表示一个点击事件。xx xx 代表Android坐标系下的坐标。同样的还有swipe代表滑动。插一句题外话 adb shell 工具使用的好对于平常的开发是大有裨益的。</p>
+<pre><code class="language-kotlin">Shell(true).exec(&quot;input tap xxx xxx&quot;)
+</code></pre>
+<p>  到此，我们已经解决了模拟点击的步骤。点击完成再去本地文件中看一下发现所属的账户信息已经写入成功了。同时在后台也发现了这台设备已经在线，可以愉快的连接上去搞事情啦。</p>
+<h3 id="结语">结语</h3>
+<p>  以上就是笔者面对这个需求从懵逼到最后实现整个需求的过程。事后看来有很多没有按照Android开发规范来进行操作，如获取弹窗是直接dump出xml来进行解析而不是通过WindowManager来进行操作。但是想分享的是整个需求的实现思路。希望能对你有一点点帮助。</p>
 ]]></content>
     </entry>
 </feed>
