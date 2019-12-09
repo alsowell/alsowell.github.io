@@ -2,7 +2,7 @@
 <feed xmlns="http://www.w3.org/2005/Atom">
     <id>https://alsowell.github.io/</id>
     <title>ALSOWELL`Blog</title>
-    <updated>2019-12-08T06:41:05.611Z</updated>
+    <updated>2019-12-09T08:08:34.515Z</updated>
     <generator>https://github.com/jpmonette/feed</generator>
     <link rel="alternate" href="https://alsowell.github.io/"/>
     <link rel="self" href="https://alsowell.github.io//atom.xml"/>
@@ -10,6 +10,145 @@
     <logo>https://alsowell.github.io//images/avatar.png</logo>
     <icon>https://alsowell.github.io//favicon.ico</icon>
     <rights>All rights reserved 2019, ALSOWELL`Blog</rights>
+    <entry>
+        <title type="html"><![CDATA[再学Android：系统开机流程]]></title>
+        <id>https://alsowell.github.io//post/zai-xue-androidxi-tong-kai-ji-liu-cheng</id>
+        <link href="https://alsowell.github.io//post/zai-xue-androidxi-tong-kai-ji-liu-cheng">
+        </link>
+        <updated>2019-12-09T08:07:28.000Z</updated>
+        <content type="html"><![CDATA[<h4 id="整体流程">整体流程</h4>
+<ul>
+<li>Android开机时按照<code>loader</code>-&gt;<code>kernel</code>-&gt;<code>framework</code>-&gt;<code>application</code>的流程来进行的。附上Android架构图<br></li>
+</ul>
+<p><img src="https://tva1.sinaimg.cn/large/006tNbRwly1g9qaqc8eosj30lm0fita7.jpg" alt=""><br>
+<br><br>
+再附图一张，启动流程图<br>
+<img src="https://tva1.sinaimg.cn/large/006tNbRwly1g9qazhj6tzj30tc0qowif.jpg" alt=""></p>
+<h4 id="loader层">loader层</h4>
+<p><code>boot rom</code>手机处于关机状态下，长按开机键开机，会引导芯片从烧录在rom里面预设的代码开始执行，加载引导程序到ram。<br><br>
+<code>boot loader</code>:启动Android系统之前的引导程序，主要是检查ram,初始化参数。</p>
+<h4 id="kernel层">kernel层</h4>
+<p>指的就是Android内核层，一般指的是开机刚刚结束进入到Android系统，<code>kernel</code>层启动流程如下:</p>
+<ul>
+<li>启动<code>swapper</code>进程，pid=0。系统初始化kernel创建的第一个进程，用户初始化进程管理、内存管理、加载<code>display</code>,<code>camera</code>,<code>binder</code>等驱动。<mark>拓展：systemServer是什么时候启动的？binder服务是cs架构，既然ams等都是基于binder的那么先有鸡还是先有蛋</mark>分析见下文</li>
+<li>启动<code>kthreadd</code>进程，这里是加载linux系统的内核进程，会创建内核工作线程<code>kworker</code>、软中断线程<code>ksoftirqd</code>和<code>thermal</code>等内核守护进程。<code>kthreadd</code>是所有内核进程的老爹。</li>
+</ul>
+<h4 id="native层">native层</h4>
+<p>这里的<code>native</code>层主要包括由<code>init</code>进程孵化出来的用户空间的守护进程，<code>bootanim</code>开机动画和<code>hal</code>层等。<code>init</code>是<code>linux</code>系统的守护进程，是所有用户空间进程的老爹;<mark>注意区分内核进程和用户进程的区别</mark></p>
+<ul>
+<li>init进程还会孵化出<code>ueventd</code>,<code>logd</code>,<code>adbd</code>,<code>healthd</code>,<code>installd</code>,<code>adbd</code>等用户守护进程</li>
+<li>init进程还会启动<code>serviceManager</code>进程(用来管理binder)，bootanim等服务</li>
+<li>init进程还会孵化出<code>zygote</code>进程，<code>zygote</code>是Android系统上面第一个<code>java</code>进程，它是所有Java进程的爸爸。</li>
+</ul>
+<h4 id="framework层">framework层</h4>
+<p><code>framework</code>层是由<code>native</code>和<code>java</code>层共同组成的，协调系统平稳有序的工作。<code>framework</code>层主要包括以下内容。</p>
+<ul>
+<li><code>Media Server</code>进程，是由<code>init</code>进程<code>fork</code>而来，负责启动和管理这个那个<code>c++ framework</code>,包含<code>AudioFlinger</code>,<code>cameraService</code>等服务。</li>
+<li><code>zygote</code>进程是虚拟机孵化的第一个Java进程，是所有Java进程的老爹。</li>
+<li><code>System server</code>是由<code>zygote</code>进程fork而来，是<code>zygot</code>进程的第一个子进程，负责启动和管理整个Java framework。包括不限于ams、pms。</li>
+</ul>
+<h4 id="app层">app层</h4>
+<p><code>zygote</code>进程孵化的第一个<code>app</code>进程就是<code>launcher</code>.就是我们看到的桌面应用。因为在前面的framework中生成了各种守护进程和管理进程，对于<code>launcer</code>也就有对应的点击、长按、滑动、卸载等监听。<code>zygote</code>也会创建<code>browser</code>、<code>phone</code>、<code>email</code>等app进程。也就是说所有的app进程都是由<code>zygote</code>进程孵化而来。</p>
+<h4 id="拓展">拓展:</h4>
+<ul>
+<li>
+<p>为什么Android系统第一次开机时间会比较长</p>
+<ul>
+<li>Android系统刷机后第一次开机启动时，需要扫描所有预装的apk文件，提取dex字节码，优化并且拷贝到/data/dalvik-cache缓存目录中，因此，第一次启动耗时会明显更高。</li>
+<li>如果手动的删除了<code>/data/dalvik-cache</code>目录下的东西，那么下次在卡机时也会重新走一遍dex优化流程。</li>
+<li>sample：线下终端在升级读取流量卡号过程中，流程没有走完，导致<code>telephone.jar</code>没有被授予足够的权限，导致开机之后没法访问<code>telephoneService</code>。
+<ul>
+<li>修复办法：重新赋予权限，并且删除<code>data/dalvik-cache</code>下面的dex.oat文件，然后重启系统。</li>
+</ul>
+</li>
+</ul>
+</li>
+<li>
+<p>dalvik&amp;art虚拟的区别？</p>
+<ul>
+<li>dalvik
+<ul>
+<li>是jit模式，just-in-time，即时编译的，在程序运行时候将代码逐行逐行便已成为机器码。</li>
+</ul>
+</li>
+<li>art
+<ul>
+<li>AOT模式 ahead-of-time.预编译。</li>
+</ul>
+</li>
+<li>art 优缺点总结：
+<ul>
+<li>优点
+<ul>
+<li>系统性能的显著提升</li>
+<li>应用速度会更快</li>
+<li>节省电量</li>
+<li>硬件支持版本会更低</li>
+</ul>
+</li>
+<li>缺点
+<ul>
+<li>应用占用的系统空间会更大</li>
+<li>应用安装时间会更长</li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+</li>
+<li>
+<p>Android不同版本虚拟机演进史</p>
+<ul>
+<li>在5.0以前都是dalvik虚拟机，是jit编译模式</li>
+<li>5.0以后添加了art虚拟机，ahead-of-time</li>
+<li>7.0以后引入了全新的JIT编译器，在这个版本是art+jit混合编译。在初次安装的时候并不是全部预编译，而是通过jit编译期的分析结果进行编译。</li>
+</ul>
+</li>
+<li>
+<p>android在关机状态下是怎么做到定时开机的？</p>
+<ul>
+<li>可以定时开机的前提是有RTC部件，以及可以单独供电的纽扣电池。RTC会记录设置的时间，时间到之后会引导程序走开机流程。</li>
+</ul>
+</li>
+<li>
+<p>watchDog概念是什么？</p>
+<ul>
+<li>WatchDog <a href="http://gityuan.com/2016/06/21/watchdog/">WatchDog工作原理</a>
+<ul>
+<li><code>WatchDog</code>是一个运行在<code>system_server</code>名为<code>watchDog</code>的线程。</li>
+<li>运行过程中，如果阻塞时间超过1分钟则会触发一次watchDog,会杀死<code>system_server</code>。触发上层重启。</li>
+</ul>
+</li>
+</ul>
+</li>
+<li>
+<p>binder是什么时候被启动或者binder服务是先有鸡还是先有蛋</p>
+<ul>
+<li>通过前文分析是知道system_server是在<code>zygote</code>进程孵化出来的就是在系统启动framework层进行的</li>
+</ul>
+</li>
+<li>
+<p>怎么将一个应用变为系统系统？</p>
+<ul>
+<li>在manifest中添加:<code>andoid:shareUserId</code>=&quot;android.uid.system&quot;</li>
+<li>使用通用签名打包</li>
+<li>获取root权限，将apk Push到<code>system/app</code>目录下面自定义的目录。</li>
+<li>给system/app目录下的app增加权限</li>
+</ul>
+</li>
+<li>
+<p>怎么将一个应用修改为launcher桌面？</p>
+<ul>
+<li>在主activity的intent-filter中添加</li>
+</ul>
+<pre><code class="language-java">&lt;category android:name=&quot;android.intent.category.HOME&quot; /&gt;
+&lt;category android:name=&quot;android.intent.category.DEFAULT&quot; /&gt;
+
+</code></pre>
+</li>
+</ul>
+]]></content>
+    </entry>
     <entry>
         <title type="html"><![CDATA[再学Android：EventBus源码探究]]></title>
         <id>https://alsowell.github.io//post/zai-xue-androideventbus-yuan-ma-tan-jiu</id>
@@ -2517,65 +2656,6 @@ executor, it should be able to run [the configured maximum][maxRequests] number 
 </li>
 </ul>
 <p>当然真正请求的内部流程其实是要复杂的多，上面只是粗略的整理了一下，但是熟悉整个流程对于后面我们进入到okhttp核心代码分析的时候会更加有助于我们理解。以上就是okhttp源码分析的第一篇文章，后面会对每一步进行更详细的分析。</p>
-]]></content>
-    </entry>
-    <entry>
-        <title type="html"><![CDATA[Android开发板上TeamViewer的自动绑定]]></title>
-        <id>https://alsowell.github.io//post/teamviewer-auto-bind</id>
-        <link href="https://alsowell.github.io//post/teamviewer-auto-bind">
-        </link>
-        <updated>2019-11-05T01:44:52.000Z</updated>
-        <summary type="html"><![CDATA[<h3 id="背景">背景</h3>
-<p>  笔者目前从事的项目是线下无人值守的智能终端设备的开发，因此远程功能对异常调试以及异常恢复至关重要。固件经过修改出厂时就已经把teamviewer打入其中，且开发者可以获得root权限。正常流程出厂前会有人员将当前机器的远程绑定到公司账户下。但是如果固件经过恢复出厂设置的操作的话，那么远程就需要重新绑定，所以远程的自动绑定就特别重要。</p>
-]]></summary>
-        <content type="html"><![CDATA[<h3 id="背景">背景</h3>
-<p>  笔者目前从事的项目是线下无人值守的智能终端设备的开发，因此远程功能对异常调试以及异常恢复至关重要。固件经过修改出厂时就已经把teamviewer打入其中，且开发者可以获得root权限。正常流程出厂前会有人员将当前机器的远程绑定到公司账户下。但是如果固件经过恢复出厂设置的操作的话，那么远程就需要重新绑定，所以远程的自动绑定就特别重要。</p>
-<!-- more -->
-<p>  正常面对这种需求当然首先去找官方文档，但是翻遍Teamviewer提供的api接口也没有找到相关的实现;没办法只好拨打官方提供的技术支持电话进行咨询，经过了无数次的等待终于接通，但是技术人员的回复是不提供这个功能。</p>
-<p>  在官方支持无果的情况下，笔者只好寻找其他的解决思路，通常面对这种问题第一个解决思路是通过抓包去分析绑定流程的数据传输进行解决。拿到所属账户的用户id以及设置的唯一标识：AndroidID去进行模拟绑定。</p>
-<p>调起应用：</p>
-<figure data-type="image" tabindex="1"><img src="https://alsowell.github.io//post-images/1572922168223.jpg" alt=""></figure>
-<p>点击分配：</p>
-<figure data-type="image" tabindex="2"><img src="https://alsowell.github.io//post-images/1572922822275.jpg" alt=""></figure>
-<p>分配成功:</p>
-<figure data-type="image" tabindex="3"><img src="https://alsowell.github.io//post-images/1572922885806.jpg" alt=""></figure>
-<p>  注：笔者公司绑定TeamViewer的方式为通过打开teamviewer分配的固定的url链接通过浏览器调起Teamviewer应用进行绑定。</p>
-<p>  通过抓包可以发现绑定时候去先获取当前机器所属的账户组，然后点击分配按钮时通过获取当前机器的信息去服务器进行当前账户的分配。分配成功后会返回当前机器的远程id和连接时候的密码。<br>
-分析到这里好像已经解决了我们的需求。但是理想很丰满，现实很骨感。一顿骚操作以后发现模拟数据去请求后台也并不能在后台显示这台绑定的设备，这种方法宣告失败。</p>
-<p>  我们再回头分析一下,Teamviewer内部的绑定并不是透明的，我们仅仅通过抓包的数据去进行hook好像并不代表它内部的所有流程。可能在进行网络请求后还进行了其他的操作，但是我们并不能知道。分析到这里下一步好像应该去做反编译去获取到它内部的流程操作。但是笔者再一顿骚操作后发现其内部进行了混淆，并且之前对反编译也没有什么研究，那么这种解决思路暂时先放一放。</p>
-<p>  我们再分析一下正常绑定的流程，手动打开一个链接-&gt;通过浏览器调起应用-&gt;点击应用内的分配按钮-&gt;分配成功。整个过程关键的一步是手动点击按钮去实现。机智的你可能已经知道我们下一步的思路是通过模拟点击去进行自动绑定的实现。</p>
-<p>  但是模拟点击的实现有个问题，我们不可能每次开机以后都去进行一次模拟点击的操作，在已经绑定的情况下再去做重复的点击无疑是多此一举。那么就需要去分析是否已经绑定过，正常的思路有两个：</p>
-<ul>
-<li>通过api去获取当前机器是否已经绑定</li>
-<li>本地是否有数据记录是否绑定</li>
-</ul>
-<p>  毫无疑问去分析本地数据会更快一点，再结合之前说到的情况：机器恢复出厂设置的情况下已经绑定的远程会失效。那么我们可以分析得知本地肯定会存储一些必要的数据。那我们直接去data/data 里面去找一下。找了半天，终于在/data/data/com.teamviewer.host.market/files/global.conf路径下面发现了点东西。</p>
-<figure data-type="image" tabindex="4"><img src="https://alsowell.github.io//post-images/1572931170363.jpg" alt=""></figure>
-<!-- more -->
-<p>  可以发现OwningManagerAccountName和OwningManagerCompanyName表示当前所属账户信息的。在没有绑定的情况下这两个字段是不存在的。那么问题就解决了。在每次开机时通过判断这两个字段是否去需要绑定。<br>
-  是否绑定的问题已经解决了，那么接下来就到了重点。上面的流程分析提到：显示弹窗-&gt;点击弹窗——&gt;绑定完成。首先是判断是否已经进入到绑定的承载界面:</p>
-<pre><code class="language-kotlin">    private fun getTopService(): Boolean {
-        val exec = Shell(true).exec(&quot;dumpsys activity | grep  mFocusedActivity&quot;)
-        return exec.message.contains(&quot;com.teamviewer.host.ui.HostActivity&quot;)
-    }
-</code></pre>
-<h3 id="判断弹窗">判断弹窗</h3>
-<p>  通过获取位于栈顶的进程来判断是否浏览器成功调起应用，然后是判断弹窗是否显示以及按钮的位置，方法比较多：1.我们知道Android的窗口都是通过WinddowManager来管理的，WindowManager是一种方式；<br>
-2.另外一种方法是通过uiautomatorviewer来获取。这里着重讲一下uiautomatorviewer的方式。平常在开发过程中我们经常会使用Android sdk tools下面的uiautomatorviewer来获取当前屏幕正在显示的View层级关系以及所属位置。<br>
-<img src="https://alsowell.github.io//post-images/1572934681994.jpg" alt=""><br>
-<img src="https://alsowell.github.io//post-images/1572934977185.jpg" alt=""></p>
-<p>  同样的我们可以直接在Android 的shell环境下直接执行</p>
-<pre><code class="language-kotlin"> Shell(true).exec(&quot;uiautomator dump&quot;)
-</code></pre>
-<p>  执行这个命令，会直接在sdcard下生成一个window_dump.xml文件。我们通过解析xml分析出来当前是否处于弹窗状态以及需要模拟点击的按钮位置。</p>
-<h3 id="模拟点击">模拟点击</h3>
-<p>  说到模拟点击，你脑子里第一个想到的是什么？大多数情况下可能想到的都是AccessibilityService。AccessibilityService根据官方的介绍，是指开发者通过增加类似contentDescription的属性，从而在不修改代码的情况下，让残障人士能够获得使用体验的优化，大家可以打开AccessibilityService来试一下，点击区域，可以有语音或者触摸的提示，帮助残障人士使用App（这段介绍是我抄的）。但是AccessibilityService使用的前提是需要用户手动授权，Android默认是关闭的，对于笔者的业务场景是无法满足需求的。</p>
-<p>  那可以考虑另外一种思路，直接输入input事件。我们在平常开发中经常会用到adb shell input tap xx xx 来表示一个点击事件。xx xx 代表Android坐标系下的坐标。同样的还有swipe代表滑动。插一句题外话 adb shell 工具使用的好对于平常的开发是大有裨益的。</p>
-<pre><code class="language-kotlin">Shell(true).exec(&quot;input tap xxx xxx&quot;)
-</code></pre>
-<p>  到此，我们已经解决了模拟点击的步骤。点击完成再去本地文件中看一下发现所属的账户信息已经写入成功了。同时在后台也发现了这台设备已经在线，可以愉快的连接上去搞事情啦。</p>
-<h3 id="结语">结语</h3>
-<p>  以上就是笔者面对这个需求从懵逼到最后实现整个需求的过程。事后看来有很多没有按照Android开发规范来进行操作，如获取弹窗是直接dump出xml来进行解析而不是通过WindowManager来进行操作。但是想分享的是整个需求的实现思路。希望能对你有一点点帮助。</p>
 ]]></content>
     </entry>
 </feed>

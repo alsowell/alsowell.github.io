@@ -1,0 +1,273 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" >
+
+<title>再学Android：系统开机流程 | ALSOWELL`Blog</title>
+<meta name="description" content="Never Stop">
+
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+
+<link rel="stylesheet" href="https://use.fontawesome.com/releases/v5.7.2/css/all.css" integrity="sha384-fnmOCqbTlWIlj8LyTjo7mOUStjsKC4pOpQbqyi7RrhN7udi9RwhKkMHpvLbHG9Sr" crossorigin="anonymous">
+<link rel="shortcut icon" href="https://alsowell.github.io//favicon.ico?v=1575878900424">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.10.0/katex.min.css">
+<link rel="stylesheet" href="https://alsowell.github.io//styles/main.css">
+
+
+
+<script src="https://cdn.jsdelivr.net/npm/vue/dist/vue.js"></script>
+<script src="https://cdn.bootcss.com/highlight.js/9.12.0/highlight.min.js"></script>
+
+<link rel="stylesheet" href="https://unpkg.com/aos@next/dist/aos.css" />
+
+
+
+  </head>
+  <body>
+    <div id="app" class="main">
+
+      <div class="sidebar" :class="{ 'full-height': menuVisible }">
+  <div class="top-container" data-aos="fade-right">
+    <div class="top-header-container">
+      <a class="site-title-container" href="https://alsowell.github.io/">
+        <img src="https://alsowell.github.io//images/avatar.png?v=1575878900424" class="site-logo">
+        <h1 class="site-title">ALSOWELL`Blog</h1>
+      </a>
+      <div class="menu-btn" @click="menuVisible = !menuVisible">
+        <div class="line"></div>
+      </div>
+    </div>
+    <div>
+      
+        
+          <a href="/" class="site-nav">
+            首页
+          </a>
+        
+      
+        
+          <a href="/archives" class="site-nav">
+            归档
+          </a>
+        
+      
+        
+          <a href="/tags" class="site-nav">
+            标签
+          </a>
+        
+      
+        
+          <a href="/post/about" class="site-nav">
+            关于
+          </a>
+        
+      
+    </div>
+  </div>
+  <div class="bottom-container" data-aos="flip-up" data-aos-offset="0">
+    <div class="social-container">
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    </div>
+    <div class="site-description">
+      Never Stop
+    </div>
+    <div class="site-footer">
+      Powered by <a href="https://github.com/getgridea/gridea" target="_blank">Gridea</a> | <a class="rss" href="https://alsowell.github.io//atom.xml" target="_blank">RSS</a>
+    </div>
+  </div>
+</div>
+
+
+      <div class="main-container">
+        <div class="content-container" data-aos="fade-up">
+          <div class="post-detail">
+            <h2 class="post-title">再学Android：系统开机流程</h2>
+            <div class="post-date">2019-12-09</div>
+            
+            <div class="post-content">
+              <h4 id="整体流程">整体流程</h4>
+<ul>
+<li>Android开机时按照<code>loader</code>-&gt;<code>kernel</code>-&gt;<code>framework</code>-&gt;<code>application</code>的流程来进行的。附上Android架构图<br></li>
+</ul>
+<p><img src="https://tva1.sinaimg.cn/large/006tNbRwly1g9qaqc8eosj30lm0fita7.jpg" alt=""><br>
+<br><br>
+再附图一张，启动流程图<br>
+<img src="https://tva1.sinaimg.cn/large/006tNbRwly1g9qazhj6tzj30tc0qowif.jpg" alt=""></p>
+<h4 id="loader层">loader层</h4>
+<p><code>boot rom</code>手机处于关机状态下，长按开机键开机，会引导芯片从烧录在rom里面预设的代码开始执行，加载引导程序到ram。<br><br>
+<code>boot loader</code>:启动Android系统之前的引导程序，主要是检查ram,初始化参数。</p>
+<h4 id="kernel层">kernel层</h4>
+<p>指的就是Android内核层，一般指的是开机刚刚结束进入到Android系统，<code>kernel</code>层启动流程如下:</p>
+<ul>
+<li>启动<code>swapper</code>进程，pid=0。系统初始化kernel创建的第一个进程，用户初始化进程管理、内存管理、加载<code>display</code>,<code>camera</code>,<code>binder</code>等驱动。<mark>拓展：systemServer是什么时候启动的？binder服务是cs架构，既然ams等都是基于binder的那么先有鸡还是先有蛋</mark>分析见下文</li>
+<li>启动<code>kthreadd</code>进程，这里是加载linux系统的内核进程，会创建内核工作线程<code>kworker</code>、软中断线程<code>ksoftirqd</code>和<code>thermal</code>等内核守护进程。<code>kthreadd</code>是所有内核进程的老爹。</li>
+</ul>
+<h4 id="native层">native层</h4>
+<p>这里的<code>native</code>层主要包括由<code>init</code>进程孵化出来的用户空间的守护进程，<code>bootanim</code>开机动画和<code>hal</code>层等。<code>init</code>是<code>linux</code>系统的守护进程，是所有用户空间进程的老爹;<mark>注意区分内核进程和用户进程的区别</mark></p>
+<ul>
+<li>init进程还会孵化出<code>ueventd</code>,<code>logd</code>,<code>adbd</code>,<code>healthd</code>,<code>installd</code>,<code>adbd</code>等用户守护进程</li>
+<li>init进程还会启动<code>serviceManager</code>进程(用来管理binder)，bootanim等服务</li>
+<li>init进程还会孵化出<code>zygote</code>进程，<code>zygote</code>是Android系统上面第一个<code>java</code>进程，它是所有Java进程的爸爸。</li>
+</ul>
+<h4 id="framework层">framework层</h4>
+<p><code>framework</code>层是由<code>native</code>和<code>java</code>层共同组成的，协调系统平稳有序的工作。<code>framework</code>层主要包括以下内容。</p>
+<ul>
+<li><code>Media Server</code>进程，是由<code>init</code>进程<code>fork</code>而来，负责启动和管理这个那个<code>c++ framework</code>,包含<code>AudioFlinger</code>,<code>cameraService</code>等服务。</li>
+<li><code>zygote</code>进程是虚拟机孵化的第一个Java进程，是所有Java进程的老爹。</li>
+<li><code>System server</code>是由<code>zygote</code>进程fork而来，是<code>zygot</code>进程的第一个子进程，负责启动和管理整个Java framework。包括不限于ams、pms。</li>
+</ul>
+<h4 id="app层">app层</h4>
+<p><code>zygote</code>进程孵化的第一个<code>app</code>进程就是<code>launcher</code>.就是我们看到的桌面应用。因为在前面的framework中生成了各种守护进程和管理进程，对于<code>launcer</code>也就有对应的点击、长按、滑动、卸载等监听。<code>zygote</code>也会创建<code>browser</code>、<code>phone</code>、<code>email</code>等app进程。也就是说所有的app进程都是由<code>zygote</code>进程孵化而来。</p>
+<h4 id="拓展">拓展:</h4>
+<ul>
+<li>
+<p>为什么Android系统第一次开机时间会比较长</p>
+<ul>
+<li>Android系统刷机后第一次开机启动时，需要扫描所有预装的apk文件，提取dex字节码，优化并且拷贝到/data/dalvik-cache缓存目录中，因此，第一次启动耗时会明显更高。</li>
+<li>如果手动的删除了<code>/data/dalvik-cache</code>目录下的东西，那么下次在卡机时也会重新走一遍dex优化流程。</li>
+<li>sample：线下终端在升级读取流量卡号过程中，流程没有走完，导致<code>telephone.jar</code>没有被授予足够的权限，导致开机之后没法访问<code>telephoneService</code>。
+<ul>
+<li>修复办法：重新赋予权限，并且删除<code>data/dalvik-cache</code>下面的dex.oat文件，然后重启系统。</li>
+</ul>
+</li>
+</ul>
+</li>
+<li>
+<p>dalvik&amp;art虚拟的区别？</p>
+<ul>
+<li>dalvik
+<ul>
+<li>是jit模式，just-in-time，即时编译的，在程序运行时候将代码逐行逐行便已成为机器码。</li>
+</ul>
+</li>
+<li>art
+<ul>
+<li>AOT模式 ahead-of-time.预编译。</li>
+</ul>
+</li>
+<li>art 优缺点总结：
+<ul>
+<li>优点
+<ul>
+<li>系统性能的显著提升</li>
+<li>应用速度会更快</li>
+<li>节省电量</li>
+<li>硬件支持版本会更低</li>
+</ul>
+</li>
+<li>缺点
+<ul>
+<li>应用占用的系统空间会更大</li>
+<li>应用安装时间会更长</li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+</li>
+<li>
+<p>Android不同版本虚拟机演进史</p>
+<ul>
+<li>在5.0以前都是dalvik虚拟机，是jit编译模式</li>
+<li>5.0以后添加了art虚拟机，ahead-of-time</li>
+<li>7.0以后引入了全新的JIT编译器，在这个版本是art+jit混合编译。在初次安装的时候并不是全部预编译，而是通过jit编译期的分析结果进行编译。</li>
+</ul>
+</li>
+<li>
+<p>android在关机状态下是怎么做到定时开机的？</p>
+<ul>
+<li>可以定时开机的前提是有RTC部件，以及可以单独供电的纽扣电池。RTC会记录设置的时间，时间到之后会引导程序走开机流程。</li>
+</ul>
+</li>
+<li>
+<p>watchDog概念是什么？</p>
+<ul>
+<li>WatchDog <a href="http://gityuan.com/2016/06/21/watchdog/">WatchDog工作原理</a>
+<ul>
+<li><code>WatchDog</code>是一个运行在<code>system_server</code>名为<code>watchDog</code>的线程。</li>
+<li>运行过程中，如果阻塞时间超过1分钟则会触发一次watchDog,会杀死<code>system_server</code>。触发上层重启。</li>
+</ul>
+</li>
+</ul>
+</li>
+<li>
+<p>binder是什么时候被启动或者binder服务是先有鸡还是先有蛋</p>
+<ul>
+<li>通过前文分析是知道system_server是在<code>zygote</code>进程孵化出来的就是在系统启动framework层进行的</li>
+</ul>
+</li>
+<li>
+<p>怎么将一个应用变为系统系统？</p>
+<ul>
+<li>在manifest中添加:<code>andoid:shareUserId</code>=&quot;android.uid.system&quot;</li>
+<li>使用通用签名打包</li>
+<li>获取root权限，将apk Push到<code>system/app</code>目录下面自定义的目录。</li>
+<li>给system/app目录下的app增加权限</li>
+</ul>
+</li>
+<li>
+<p>怎么将一个应用修改为launcher桌面？</p>
+<ul>
+<li>在主activity的intent-filter中添加</li>
+</ul>
+<pre><code class="language-java">&lt;category android:name=&quot;android.intent.category.HOME&quot; /&gt;
+&lt;category android:name=&quot;android.intent.category.DEFAULT&quot; /&gt;
+
+</code></pre>
+</li>
+</ul>
+
+            </div>
+            
+            
+              <div class="next-post">
+                <div class="next">下一篇</div>
+                <a href="https://alsowell.github.io//post/zai-xue-androideventbus-yuan-ma-tan-jiu">
+                  <h3 class="post-title">
+                    再学Android：EventBus源码探究
+                  </h3>
+                </a>
+              </div>
+            
+
+            
+
+          </div>
+
+        </div>
+      </div>
+    </div>
+
+    <script src="https://unpkg.com/aos@next/dist/aos.js"></script>
+
+<script type="application/javascript">
+
+AOS.init();
+
+hljs.initHighlightingOnLoad()
+
+var app = new Vue({
+  el: '#app',
+  data: {
+    menuVisible: false,
+  },
+})
+
+</script>
+
+
+
+
+  </body>
+</html>
