@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" >
+
+<title>再学Android：应用启动流程 | ALSOWELL`Blog</title>
+<meta name="description" content="Never Stop">
+
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+
+<link rel="stylesheet" href="https://use.fontawesome.com/releases/v5.7.2/css/all.css" integrity="sha384-fnmOCqbTlWIlj8LyTjo7mOUStjsKC4pOpQbqyi7RrhN7udi9RwhKkMHpvLbHG9Sr" crossorigin="anonymous">
+<link rel="shortcut icon" href="https://alsowell.github.io//favicon.ico?v=1575946342948">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.10.0/katex.min.css">
+<link rel="stylesheet" href="https://alsowell.github.io//styles/main.css">
+
+
+
+<script src="https://cdn.jsdelivr.net/npm/vue/dist/vue.js"></script>
+<script src="https://cdn.bootcss.com/highlight.js/9.12.0/highlight.min.js"></script>
+
+<link rel="stylesheet" href="https://unpkg.com/aos@next/dist/aos.css" />
+
+
+
+  </head>
+  <body>
+    <div id="app" class="main">
+
+      <div class="sidebar" :class="{ 'full-height': menuVisible }">
+  <div class="top-container" data-aos="fade-right">
+    <div class="top-header-container">
+      <a class="site-title-container" href="https://alsowell.github.io/">
+        <img src="https://alsowell.github.io//images/avatar.png?v=1575946342948" class="site-logo">
+        <h1 class="site-title">ALSOWELL`Blog</h1>
+      </a>
+      <div class="menu-btn" @click="menuVisible = !menuVisible">
+        <div class="line"></div>
+      </div>
+    </div>
+    <div>
+      
+        
+          <a href="/" class="site-nav">
+            首页
+          </a>
+        
+      
+        
+          <a href="/archives" class="site-nav">
+            归档
+          </a>
+        
+      
+        
+          <a href="/tags" class="site-nav">
+            标签
+          </a>
+        
+      
+        
+          <a href="/post/about" class="site-nav">
+            关于
+          </a>
+        
+      
+    </div>
+  </div>
+  <div class="bottom-container" data-aos="flip-up" data-aos-offset="0">
+    <div class="social-container">
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    </div>
+    <div class="site-description">
+      Never Stop
+    </div>
+    <div class="site-footer">
+      Powered by <a href="https://github.com/getgridea/gridea" target="_blank">Gridea</a> | <a class="rss" href="https://alsowell.github.io//atom.xml" target="_blank">RSS</a>
+    </div>
+  </div>
+</div>
+
+
+      <div class="main-container">
+        <div class="content-container" data-aos="fade-up">
+          <div class="post-detail">
+            <h2 class="post-title">再学Android：应用启动流程</h2>
+            <div class="post-date">2019-12-10</div>
+            
+            <div class="post-content">
+              <h4 id="基础理论">基础理论</h4>
+<p>Android系统是基于Linux，每个APP都是运行在独立的空间内，进程是系统上应用的最小单元。Android为每个进程都分配了独立的jvm,所以基本上是应用隔离的。<br></br><br>
+Android并没有自己程序的main方法，但是内部的组件可以被其他程序的组件启动。同样本身也可以启动其他的。</p>
+<h4 id="点击启动">点击启动</h4>
+<p>直接从打开一个没有启动过的应用来讲:</p>
+<ul>
+<li>用户在launcher桌面点击应用图标，对于launcher来讲已经知道对应的应用对应什么包名以及入口activity，这个都是安装的时候以及解析出来的了。</li>
+<li>调用<code>startActivity()</code>方法，通过ipc告诉<code>ActivityManagerService</code>我要启动这个activity了。</li>
+<li>ams在在内部会进行如下操作:
+<ul>
+<li>通过<code>PackageManager</code>的<code>resloveIntent()</code>方法来收集这个intent对象的指向信息。</li>
+<li>指向信息被储存到一个intent对象中。</li>
+<li>通过<code>grantUriPermissionLocaked()</code>方法来判断当前应用是否有权限来调用对应的activity。</li>
+<li>有权限，ams会在新的task中启动activity(我们在自身应用打开其他应用的界面都是需要添加newTask的flag的)</li>
+<li>现在去检查ProcessRecord是否存在，如果不存在，那么ams会创建新的进程来实例化activity</li>
+</ul>
+</li>
+<li>对于Android系统来说，当前需要被启动的activity已经属于一个新的应用了，但是还没有给它分配过uid。此时会通过<code>zygote</code>进程来孵化出一个进程来作为需要被打开的应用的承载。(zygote是所有Java进程的爸爸，这个在系统启动分析中有说过)</li>
+<li>ams会调用<code>startProcessLocked()</code>方法来创建新的进程，这个时候<code>zygote</code>会孵化自身，并调用zygote的main方法来实例化<code>ActivityThread</code>对象并且返回新进程的pid.</li>
+</ul>
+<p><code>activityThread</code>会依次调用<code>Looper.prepareLoop()</code>和<code>Looper.loop()</code>方法来开启消息循环。</p>
+<figure data-type="image" tabindex="1"><img src="https://tva1.sinaimg.cn/large/006tNbRwly1g9qm7zgvbyj30xc0j878a.jpg" alt=""></figure>
+<h4 id="绑定application">绑定Application</h4>
+<p>接着就是将进程和<code>Application</code>绑定起来了。绑定流程是通过<code>ActivityThread</code>的<code>bindApplication()</code>方法来完成的。绑定过程中会构造一个<code>AppBindData</code>的对象，然后会将其作为参数通过<code>sendMessage()</code>方法发送一个<code>H.BIND_APPLICATION</code>标识的消息。然后通过<code>handleMessage()</code>方法来处理这条消息，接着调用<code>handleBindApplication()</code>，最终调用<code>makeApplication()</code>方法来构造出一个application对象，接着调用applicaton的onCrate()方法。<br></p>
+<figure data-type="image" tabindex="2"><img src="https://tva1.sinaimg.cn/large/006tNbRwly1g9rel617hnj30x50gfjvb.jpg" alt=""></figure>
+<h4 id="启动activity">启动Activity</h4>
+<p>经过前面的步骤，系统已经拥有了<code>Application</code>的进程。后面的调用顺序就是从一个已经存在的进程启动一个新进程的activity了。实际调用的方法是<code>realStartActivity()</code>,它会调用application线程对象中的<code>sheduleLaunchActivity()</code>发送一个<code>LAUNCH_ACTIVITY</code>消息到消息队列中，通过<code>handleLaunchActivity()</code>来处理该消息。<br>
+<img src="https://i.loli.net/2019/12/10/5JfkVocGy3PSKUI.png" alt=""><br>
+至此，一个应用的启动流程就结束了。</p>
+
+            </div>
+            
+            
+              <div class="next-post">
+                <div class="next">下一篇</div>
+                <a href="https://alsowell.github.io//post/zai-xue-androidxi-tong-kai-ji-liu-cheng">
+                  <h3 class="post-title">
+                    再学Android：系统开机流程
+                  </h3>
+                </a>
+              </div>
+            
+
+            
+
+          </div>
+
+        </div>
+      </div>
+    </div>
+
+    <script src="https://unpkg.com/aos@next/dist/aos.js"></script>
+
+<script type="application/javascript">
+
+AOS.init();
+
+hljs.initHighlightingOnLoad()
+
+var app = new Vue({
+  el: '#app',
+  data: {
+    menuVisible: false,
+  },
+})
+
+</script>
+
+
+
+
+  </body>
+</html>
