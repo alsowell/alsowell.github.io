@@ -1,0 +1,368 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" >
+
+<title>再学Android：Activity启动流程 | ALSOWELL`Blog</title>
+<meta name="description" content="Never Stop">
+
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+
+<link rel="stylesheet" href="https://use.fontawesome.com/releases/v5.7.2/css/all.css" integrity="sha384-fnmOCqbTlWIlj8LyTjo7mOUStjsKC4pOpQbqyi7RrhN7udi9RwhKkMHpvLbHG9Sr" crossorigin="anonymous">
+<link rel="shortcut icon" href="https://alsowell.github.io//favicon.ico?v=1576048385256">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.10.0/katex.min.css">
+<link rel="stylesheet" href="https://alsowell.github.io//styles/main.css">
+
+
+
+<script src="https://cdn.jsdelivr.net/npm/vue/dist/vue.js"></script>
+<script src="https://cdn.bootcss.com/highlight.js/9.12.0/highlight.min.js"></script>
+
+<link rel="stylesheet" href="https://unpkg.com/aos@next/dist/aos.css" />
+
+
+
+  </head>
+  <body>
+    <div id="app" class="main">
+
+      <div class="sidebar" :class="{ 'full-height': menuVisible }">
+  <div class="top-container" data-aos="fade-right">
+    <div class="top-header-container">
+      <a class="site-title-container" href="https://alsowell.github.io/">
+        <img src="https://alsowell.github.io//images/avatar.png?v=1576048385256" class="site-logo">
+        <h1 class="site-title">ALSOWELL`Blog</h1>
+      </a>
+      <div class="menu-btn" @click="menuVisible = !menuVisible">
+        <div class="line"></div>
+      </div>
+    </div>
+    <div>
+      
+        
+          <a href="/" class="site-nav">
+            首页
+          </a>
+        
+      
+        
+          <a href="/archives" class="site-nav">
+            归档
+          </a>
+        
+      
+        
+          <a href="/tags" class="site-nav">
+            标签
+          </a>
+        
+      
+        
+          <a href="/post/about" class="site-nav">
+            关于
+          </a>
+        
+      
+    </div>
+  </div>
+  <div class="bottom-container" data-aos="flip-up" data-aos-offset="0">
+    <div class="social-container">
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    </div>
+    <div class="site-description">
+      Never Stop
+    </div>
+    <div class="site-footer">
+      Powered by <a href="https://github.com/getgridea/gridea" target="_blank">Gridea</a> | <a class="rss" href="https://alsowell.github.io//atom.xml" target="_blank">RSS</a>
+    </div>
+  </div>
+</div>
+
+
+      <div class="main-container">
+        <div class="content-container" data-aos="fade-up">
+          <div class="post-detail">
+            <h2 class="post-title">再学Android：Activity启动流程</h2>
+            <div class="post-date">2019-12-11</div>
+            
+            <div class="post-content">
+              <h4 id="前言">前言</h4>
+<p>Android开发最常接触到的就是activity了，关于activity的启动也一直是面试中问道比较多的问题。在之前的文章中有分析过应用的启动流程，对于activity的启动也只是一笔带过，本篇文章将更详细的分析activity启动的整体流程。首先看一张流程图：<br>
+<img src="https://i.loli.net/2019/12/10/WDVUioF2hgsaeNz.png" alt=""></p>
+<h4 id="流程分析">流程分析</h4>
+<p>我们在应用启动流程中说过Android中通过<code>zygote</code>孵化出来的应用进程是通过<code>ActivityThread</code>来绑定进程的，那么就先来看一下<code>ActivityThread</code>。</p>
+<h5 id="activitythread">ActivityThread</h5>
+<p>注：本文分析是基于Android api 28.<br><br>
+Android与Java不同的地方在于系统并没有暴露<code>main()</code>方法出来，但是它毕竟是个爪哇，在<code>ActivityThread</code>中可以看到是有<code>main()</code>方法的实现的。</p>
+<h6 id="main方法">main方法</h6>
+<p>在main方法中首先会进行<code>Looper.prepareMainLooper();</code>进行主线程的初始化，这也就是为什么主线程不需要我们手动调用looper.prepare()。子线程中获取handler就需要调用的原因。接着是构造出来一个<code>ActivityThread</code>对象。紧接着调用<code>attach()</code>方法来进行activityThread和进程的绑定，然后开始调用<code>looper.loop()</code>来进行消息队列的循环。</p>
+<h6 id="attach方法">attach方法</h6>
+<pre><code class="language-java">    private void attach(boolean system, long startSeq)
+</code></pre>
+<p>attach方法是有两个参数的，<code>system</code>代表是否为系统进程，一般我们开发的应用都是属于用户进程的。</p>
+<ul>
+<li>
+<p>用户进程</p>
+<ul>
+<li>首先会调用<code>ensureJitEnabled()</code>方法，还记得我们在<a href="https://alsowell.github.io/post/zai-xue-androidxi-tong-kai-ji-liu-cheng/">再学Android：系统开机流程</a>的拓展中介绍过不同版本Android系统的虚拟机变更，在Android7.0以上，Google又把jit编译模式添加了回来，用于更快的安装应用，并且配合art模式可以保证运行效率。</li>
+<li>接着通过binder机制获取到ams的<strong>代理实例</strong><pre><code class="language-java">//attach 方法中获取代理实例
+final IActivityManager mgr = ActivityManager.getService();
+//跟踪进去ActivityManager 
+    public static IActivityManager getService() {
+    return IActivityManagerSingleton.get();
+}
+//通过ipc调用 获取到系统提供的ams服务，是不是很熟悉？
+private static final Singleton&lt;IActivityManager&gt; IActivityManagerSingleton =
+        new Singleton&lt;IActivityManager&gt;() {
+            @Override
+            protected IActivityManager create() {
+                final IBinder b = ServiceManager.getService(Context.ACTIVITY_SERVICE);
+                final IActivityManager am = IActivityManager.Stub.asInterface(b);
+                return am;
+            }
+        };
+</code></pre>
+</li>
+<li>接着通过获取到的代理对象调用<code>attachApplication()</code>方法</li>
+</ul>
+<pre><code class="language-java">
+    public final void attachApplication(IApplicationThread thread, long startSeq) {
+    synchronized (this) {
+        int callingPid = Binder.getCallingPid();
+        final int callingUid = Binder.getCallingUid();
+        final long origId = Binder.clearCallingIdentity();
+        attachApplicationLocked(thread, callingPid, callingUid, startSeq);
+        Binder.restoreCallingIdentity(origId);
+    }
+}
+</code></pre>
+<ul>
+<li>可以看到是通过<code>attachApplicationLocked()</code>方法来进行thread与application的绑定。</li>
+</ul>
+</li>
+<li>
+<p>系统进程</p>
+<pre><code class="language-java">try {
+mInstrumentation = new Instrumentation();
+mInstrumentation.basicInit(this);
+ContextImpl context = ContextImpl.createAppContext(
+        this, getSystemContext().mPackageInfo);
+mInitialApplication = context.mPackageInfo.makeApplication(true, null);
+mInitialApplication.onCreate();
+} catch (Exception e) {
+    throw new RuntimeException(
+            &quot;Unable to instantiate Application():&quot; + e.toString(), e);
+}
+</code></pre>
+<p>从上面的关键代码可以看到，首先是初始化了一个<code>Instrumentation()</code>，关于这个东西后面有机会会讲到。然后通过<code>ContextImpl</code>创建了application的context,紧接着通过<code>makeApplication()</code>方法构造出来一个application实例，然后调用其onCreate方法。关于详细分解，我们留待下文。</p>
+</li>
+</ul>
+<h4 id="用户进程绑定application">用户进程绑定Application</h4>
+<p>我们这里着重来分析下用户进程的进程绑定，上文说到我们获取到<code>ActivityManagerService</code>的代理实例，然后调用其<code>attachApplication()</code>方法。<code>attachApplication</code>又是调用<code>attachApplicationLocked</code>来进行进程绑定。这里有一个关键参数<code>IApplicationThread</code>。</p>
+<pre><code class="language-java">thread.bindApplication(processName, appInfo, providers,
+        app.instr.mClass,
+        profilerInfo, app.instr.mArguments,
+        app.instr.mWatcher,
+        app.instr.mUiAutomationConnection, testMode,
+        mBinderTransactionTrackingEnabled, enableTrackAllocation,
+        isRestrictedBackupMode || !normalMode, app.persistent,
+        new Configuration(getGlobalConfiguration()), app.compat,
+        getCommonServicesLocked(app.isolated),
+        mCoreSettingsObserver.getCoreSettingsLocked(),
+        buildSerial, isAutofillCompatEnabled);
+
+</code></pre>
+<p>方法的最终是调用这个方法来进行进程的关联，这里离不开<code>ApplicationThread</code>。我们接着来分析下；</p>
+<h4 id="applicationthread">ApplicationThread</h4>
+<p>可以看到<code>ApplicationThread</code>是<code>ActivityThread</code>的内部类，其是继承了<code>IApplicationThread.Stub</code>。关于跨进程通信中有分析过，对于server端来说。binder是其内部的实体对象，是对于定义的方法的具体实现。既然关键方法是<code>bindApplication()</code>。看一下具体内部实现:</p>
+<pre><code class="language-java">    //省略代码
+    //setCoreSettings 内部是发了一个`H.SET_CORE_SETTINGS`的消息
+    setCoreSettings(coreSettings);
+    //省略代码
+    AppBindData data = new AppBindData();
+    //省略代码  
+    //发送一个`H.BIND_APPLICATION`的消息，并将封装的data作为参数一起传入 
+    sendMessage(H.BIND_APPLICATION, data);
+
+</code></pre>
+<p>可以知道，bindApplication也是通过调用handler的消息机制来发送出来一个消息，具体是通过<code>handleMessage</code>方法来处理。</p>
+<h4 id="handlemesagge">handleMesagge</h4>
+<p>前文有说到，在<code>main</code>方法中已经开启了<code>looper.loop()</code>来进行消息轮询。那么bindApplication中发送了BIND_APPLICATION的消息，那么对应的也会被处理。</p>
+<h5 id="handlebindapplication">handleBindApplication</h5>
+<p>整个bindApplication的方法其实是很长的，这里挑选出来几句关键的代码。</p>
+<pre><code class="language-java">//省略代码
+//获取到`ContextImp`的类加载器，通过loadClass去实例化一个`Instrumentation`。
+final ClassLoader cl = instrContext.getClassLoader();
+mInstrumentation = (Instrumentation)
+    cl.loadClass(data.instrumentationName.getClassName()).newInstance();
+//省略代码 
+//构建一个application的实例对象
+app = data.info.makeApplication(data.restrictedBackupMode, null);
+//省略代码 
+mInitialApplication = app;
+//省略代码
+//调用applicaton的onCreate方法
+mInstrumentation.callApplicationOnCreate(app);
+</code></pre>
+<p>可以看到在创建application的过程中，<code>Instrumentation</code>出现了很多次，并且创建过程也是通过它调用的，那么它究竟是个什么东西呢？</p>
+<h4 id="instrumentation">Instrumentation</h4>
+<p><code>Instrumentation</code>直译过来大概是一个仪器，结合场景可以理解为可以观察的仪表盘。我们先看一下类注释:<br></p>
+<p><em><strong>Instrumentation会在应用程序的任何代码运行之前被实例化，它能够允许你监视应用程序和系统的所有交互</strong>。</em></p>
+<p>通过上文的分析可以知道<code>Instrumentation</code>是在application初始化之前就已经构造了。那么它是怎么实现见识应用程序和系统的交互呢?<br>
+<img src="https://i.loli.net/2019/12/11/Xyfsx21ieLrNzYw.png" alt=""></p>
+<p>查看这个类的方法可以看到，activity包括applicaton的生命周期回调都是通过这个类来进行的。</p>
+<p>这么做的好处在哪里呢？<code>Instrumentation</code>作为抽象，其实是对这个观察仪表盘进行了抽象的功能。其实就是多态的运用。</p>
+<p>既然我们在创建applicaton过程中是调用的<code>Instrumentation</code>中的<code>callApplicatonOnCreate()</code>方法。那么详细来看一下，但是！你会发现内部其实就是调用了一下app的onCreate方法。是不是有点不太对劲。没关系，再来想想：在调用<code>mInstrumentation.callApplicationOnCreate(app)</code>之前，其实是通过<code>data.info.makeApplication(data.restrictedBackupMode, null)</code>来创建一个app实例，data.info其实是<code>loadedApk</code>。</p>
+<h4 id="loadedapk">LoadedApk</h4>
+<p>既然是将Activity的启动流程，activity需要依附于application。我们还是直接来看makeApplicaton的具体实现。</p>
+<pre><code class="language-java">
+java.lang.ClassLoader cl = getClassLoader();
+if (!mPackageName.equals(&quot;android&quot;)) {
+    Trace.traceBegin(Trace.TRACE_TAG_ACTIVITY_MANAGER,
+            &quot;initializeJavaContextClassLoader&quot;);
+    initializeJavaContextClassLoader();
+    Trace.traceEnd(Trace.TRACE_TAG_ACTIVITY_MANAGER);
+}
+ContextImpl appContext = ContextImpl.createAppContext(mActivityThread, this);
+app = mActivityThread.mInstrumentation.newApplication(
+        cl, appClass, appContext);
+</code></pre>
+<p>这里是获取到当前的类加载器，关于<code>ClassLoader</code>的分析已在其他文章中讲过，这里不作具体介绍。然后通过<code>ContextImpl</code>创建出app的上下文，最后通过<code>instrumentation</code>的newApplicaton方法去构造出真正的applicaton实例。</p>
+<p>通过上面的分析我们知道：app还是通过<code>Instrumentation</code>创建的。来看一下具体的方法:</p>
+<pre><code class="language-java">public Application newApplication(ClassLoader cl, String className, Context context)
+        throws InstantiationException, IllegalAccessException, 
+        ClassNotFoundException {
+    Application app = getFactory(context.getPackageName())
+            .instantiateApplication(cl, className);
+    app.attach(context);
+    return app;
+}
+//反射创建applicaton 
+public @NonNull Application instantiateApplication(@NonNull ClassLoader cl,
+        @NonNull String className)
+        throws InstantiationException, IllegalAccessException, ClassNotFoundException {
+    return (Application) cl.loadClass(className).newInstance();
+}
+
+</code></pre>
+<p><code>newApplicaton</code>方法也是真的很简单易懂，首先通过反射创造出实例（注：class.loadClass只是构建出实例，并没有进行初始化，而class.forName会进行初始化，这点可以在源码中发现）。紧接着调用<code>app.attach()</code>方法，内部其实调用了<code>attachBaseContext(context);</code>。这也能解释<mark>为什么<code>attachBaseContext</code>在<code>onCreate</code>之前的问题。</mark></p>
+<h4 id="activity创建">activity创建</h4>
+<p>说完了<code>Application</code>的创建问题，我们再来看一下本文的主题创建activity并启动。<br><br>
+上文的流程图的源码是基于SDK26,本文中是基于28,部分代码已经被google改动过，26中还有LAUNCH_ACTIVITY标识的消息，在28中已经被去除。<br><br>
+既然前文有看到<code>Instrumentation</code>都会观察activity的创建，我们通过反推来看一下activity是怎么被创建出来的。通过源码观察指导是<code>ActivityThread</code>中的<code>performLaunchActivity</code>方法来调用newActivity方法通过反射来生成activity的实例的。在通过一系列的源码追踪，终于能找到activity创建的来龙去脉。</p>
+<ul>
+<li>首先调用<code>handleLaunchActivity()</code>方法</li>
+<li>紧接着调用<code>performLaunchActivity()</code><pre><code class="language-java">    java.lang.ClassLoader cl = appContext.getClassLoader();
+    activity = mInstrumentation.newActivity(
+        cl, component.getClassName(), r.intent);
+    //调用Instrumentation中的newActivity方法
+    public Activity newActivity(ClassLoader cl, String className,
+        Intent intent)
+        throws InstantiationException, IllegalAccessException,
+        ClassNotFoundException {
+    String pkg = intent != null &amp;&amp; intent.getComponent() != null
+            ? intent.getComponent().getPackageName() : null;
+    return getFactory(pkg).instantiateActivity(cl, className, intent);
+}
+//同样通过反射实例化出来activity 
+    public @NonNull Activity instantiateActivity(@NonNull ClassLoader cl, @NonNull String className,
+        @Nullable Intent intent)
+        throws InstantiationException, IllegalAccessException, ClassNotFoundException {
+    return (Activity) cl.loadClass(className).newInstance();
+}
+</code></pre>
+<ul>
+<li>可以看到同样是获取到classLoader，然后通过反射的方式来获取Activity的实例对象。</li>
+</ul>
+</li>
+<li>在<code>performLaunchActivity</code>方法中获取到activity的实例之后，会有一些细节方面的初始化:
+<ul>
+<li>初始化配置，包括fontScale/mcc/mnc等</li>
+<li>初始化Window（Window是Android系统窗口的抽象基类，这个后续文章会分析到）</li>
+<li>调用activity.attach方法
+<ul>
+<li>在attach方法中会将fragment依附在activity中，初始化<code>PhoneWindow</code>，然后设置windowManager,设置键盘输入模式，设置主题色等等。</li>
+</ul>
+</li>
+<li>紧接着就是调用<code>mInstrumentation.callActivityOnCreate</code>来调用activity.onCreate().（顺带提一下，在activity.onCreate()中会调用<code>getApplication().dispatchActivityCreated(this, savedInstanceState);</code>这也是为什么我们可以在applicaton中注册actvity的生命周期回调的原因）</li>
+</ul>
+</li>
+<li>后续就是按照正常的activity的生命周期往下走啦。</li>
+</ul>
+<h4 id="总结">总结</h4>
+<p>上面说了这么多我们来大概总结下整个activity的创建流程(从用户点击桌面上的启动图标开始)</p>
+<ul>
+<li>Android为每个应用都分配了至少一个进程，而进程是通过<code>zygote</code>孵化而来</li>
+<li>java作为Android的实现语言，Android也是保留了Java的特性，程序的主入口为main方法，但是Android并没有暴露出来。</li>
+<li>在<code>ActivityThread</code>的<code>main()</code>方法中，会调用<code>Looper.prepareMainLooper()</code>,然后new出来一个<code>ActivityThread</code>对象，调用attach()方法来将应用与<code>zygote</code>孵化出来的进程绑定。主要流程如下:
+<ul>
+<li>获取到ams的代理实例对象</li>
+<li>调用ams的attachApplicaton方法并传入ApplicaionThread</li>
+<li>在<code>ActivityManagerService</code>中调用<code>attachApplicaton（）</code>实际调用的是applicatonThread的<code>bindApplicaton()</code>方法,在此方法中会发送一个<code>BIND_APPLICATION</code>的消息</li>
+<li>在handleMessage中调用<code>handleBindApplication</code>然后会通过Instrumentation反射出一个app实例。</li>
+<li>紧接着回调attachToBaseContext和onCreate。</li>
+</ul>
+</li>
+<li>activity的创建也是通过instrumentaion中的<code>newActivity</code>方法来进行的，这里同样也是通过反射。</li>
+<li>但是与7.0和8.0的区别在于源码中已经去除LAUNCH_ACTIVITY的消息标识。统一通过RELAUNCH_ACTIVITY标识来进行activity的创建。</li>
+<li>在接收到消息之后还是会调用到<code>handleLaunchActivity</code></li>
+<li>在其中继续调用<code>performLaunchActivity</code>，然后通过反射构建出activity的对象。紧接着调用activity.attach方法来进行一些默认的参数设置。</li>
+<li>最后通过instrumentation回调activity的oncreate方法。（回到的同时也会回调applicaon中注册的activity生命周期监听）</li>
+</ul>
+<p>以上就是大概的activity整体启动流程分析，其中涉及到很多地方都是一笔带过。但是基本上能让人了解activity创建的大概步骤，后续有机会会再开单章对细节进行分析。</p>
+<h4 id="参考资料">参考资料</h4>
+<p><a href="https://juejin.im/entry/58f5b68e61ff4b005807ab47">3分钟看懂Activity启动流程</a></p>
+
+            </div>
+            
+            
+              <div class="next-post">
+                <div class="next">下一篇</div>
+                <a href="https://alsowell.github.io//post/zai-xue-androidying-yong-qi-dong-liu-cheng">
+                  <h3 class="post-title">
+                    再学Android：应用启动流程
+                  </h3>
+                </a>
+              </div>
+            
+
+            
+
+          </div>
+
+        </div>
+      </div>
+    </div>
+
+    <script src="https://unpkg.com/aos@next/dist/aos.js"></script>
+
+<script type="application/javascript">
+
+AOS.init();
+
+hljs.initHighlightingOnLoad()
+
+var app = new Vue({
+  el: '#app',
+  data: {
+    menuVisible: false,
+  },
+})
+
+</script>
+
+
+
+
+  </body>
+</html>

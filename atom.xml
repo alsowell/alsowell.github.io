@@ -2,7 +2,7 @@
 <feed xmlns="http://www.w3.org/2005/Atom">
     <id>https://alsowell.github.io/</id>
     <title>ALSOWELL`Blog</title>
-    <updated>2019-12-10T02:52:55.692Z</updated>
+    <updated>2019-12-11T07:13:28.587Z</updated>
     <generator>https://github.com/jpmonette/feed</generator>
     <link rel="alternate" href="https://alsowell.github.io/"/>
     <link rel="self" href="https://alsowell.github.io//atom.xml"/>
@@ -10,6 +10,240 @@
     <logo>https://alsowell.github.io//images/avatar.png</logo>
     <icon>https://alsowell.github.io//favicon.ico</icon>
     <rights>All rights reserved 2019, ALSOWELL`Blog</rights>
+    <entry>
+        <title type="html"><![CDATA[再学Android：Activity启动流程]]></title>
+        <id>https://alsowell.github.io//post/zai-xue-androidactivity-qi-dong-liu-cheng</id>
+        <link href="https://alsowell.github.io//post/zai-xue-androidactivity-qi-dong-liu-cheng">
+        </link>
+        <updated>2019-12-11T07:12:46.000Z</updated>
+        <content type="html"><![CDATA[<h4 id="前言">前言</h4>
+<p>Android开发最常接触到的就是activity了，关于activity的启动也一直是面试中问道比较多的问题。在之前的文章中有分析过应用的启动流程，对于activity的启动也只是一笔带过，本篇文章将更详细的分析activity启动的整体流程。首先看一张流程图：<br>
+<img src="https://i.loli.net/2019/12/10/WDVUioF2hgsaeNz.png" alt=""></p>
+<h4 id="流程分析">流程分析</h4>
+<p>我们在应用启动流程中说过Android中通过<code>zygote</code>孵化出来的应用进程是通过<code>ActivityThread</code>来绑定进程的，那么就先来看一下<code>ActivityThread</code>。</p>
+<h5 id="activitythread">ActivityThread</h5>
+<p>注：本文分析是基于Android api 28.<br><br>
+Android与Java不同的地方在于系统并没有暴露<code>main()</code>方法出来，但是它毕竟是个爪哇，在<code>ActivityThread</code>中可以看到是有<code>main()</code>方法的实现的。</p>
+<h6 id="main方法">main方法</h6>
+<p>在main方法中首先会进行<code>Looper.prepareMainLooper();</code>进行主线程的初始化，这也就是为什么主线程不需要我们手动调用looper.prepare()。子线程中获取handler就需要调用的原因。接着是构造出来一个<code>ActivityThread</code>对象。紧接着调用<code>attach()</code>方法来进行activityThread和进程的绑定，然后开始调用<code>looper.loop()</code>来进行消息队列的循环。</p>
+<h6 id="attach方法">attach方法</h6>
+<pre><code class="language-java">    private void attach(boolean system, long startSeq)
+</code></pre>
+<p>attach方法是有两个参数的，<code>system</code>代表是否为系统进程，一般我们开发的应用都是属于用户进程的。</p>
+<ul>
+<li>
+<p>用户进程</p>
+<ul>
+<li>首先会调用<code>ensureJitEnabled()</code>方法，还记得我们在<a href="https://alsowell.github.io/post/zai-xue-androidxi-tong-kai-ji-liu-cheng/">再学Android：系统开机流程</a>的拓展中介绍过不同版本Android系统的虚拟机变更，在Android7.0以上，Google又把jit编译模式添加了回来，用于更快的安装应用，并且配合art模式可以保证运行效率。</li>
+<li>接着通过binder机制获取到ams的<strong>代理实例</strong><pre><code class="language-java">//attach 方法中获取代理实例
+final IActivityManager mgr = ActivityManager.getService();
+//跟踪进去ActivityManager 
+    public static IActivityManager getService() {
+    return IActivityManagerSingleton.get();
+}
+//通过ipc调用 获取到系统提供的ams服务，是不是很熟悉？
+private static final Singleton&lt;IActivityManager&gt; IActivityManagerSingleton =
+        new Singleton&lt;IActivityManager&gt;() {
+            @Override
+            protected IActivityManager create() {
+                final IBinder b = ServiceManager.getService(Context.ACTIVITY_SERVICE);
+                final IActivityManager am = IActivityManager.Stub.asInterface(b);
+                return am;
+            }
+        };
+</code></pre>
+</li>
+<li>接着通过获取到的代理对象调用<code>attachApplication()</code>方法</li>
+</ul>
+<pre><code class="language-java">
+    public final void attachApplication(IApplicationThread thread, long startSeq) {
+    synchronized (this) {
+        int callingPid = Binder.getCallingPid();
+        final int callingUid = Binder.getCallingUid();
+        final long origId = Binder.clearCallingIdentity();
+        attachApplicationLocked(thread, callingPid, callingUid, startSeq);
+        Binder.restoreCallingIdentity(origId);
+    }
+}
+</code></pre>
+<ul>
+<li>可以看到是通过<code>attachApplicationLocked()</code>方法来进行thread与application的绑定。</li>
+</ul>
+</li>
+<li>
+<p>系统进程</p>
+<pre><code class="language-java">try {
+mInstrumentation = new Instrumentation();
+mInstrumentation.basicInit(this);
+ContextImpl context = ContextImpl.createAppContext(
+        this, getSystemContext().mPackageInfo);
+mInitialApplication = context.mPackageInfo.makeApplication(true, null);
+mInitialApplication.onCreate();
+} catch (Exception e) {
+    throw new RuntimeException(
+            &quot;Unable to instantiate Application():&quot; + e.toString(), e);
+}
+</code></pre>
+<p>从上面的关键代码可以看到，首先是初始化了一个<code>Instrumentation()</code>，关于这个东西后面有机会会讲到。然后通过<code>ContextImpl</code>创建了application的context,紧接着通过<code>makeApplication()</code>方法构造出来一个application实例，然后调用其onCreate方法。关于详细分解，我们留待下文。</p>
+</li>
+</ul>
+<h4 id="用户进程绑定application">用户进程绑定Application</h4>
+<p>我们这里着重来分析下用户进程的进程绑定，上文说到我们获取到<code>ActivityManagerService</code>的代理实例，然后调用其<code>attachApplication()</code>方法。<code>attachApplication</code>又是调用<code>attachApplicationLocked</code>来进行进程绑定。这里有一个关键参数<code>IApplicationThread</code>。</p>
+<pre><code class="language-java">thread.bindApplication(processName, appInfo, providers,
+        app.instr.mClass,
+        profilerInfo, app.instr.mArguments,
+        app.instr.mWatcher,
+        app.instr.mUiAutomationConnection, testMode,
+        mBinderTransactionTrackingEnabled, enableTrackAllocation,
+        isRestrictedBackupMode || !normalMode, app.persistent,
+        new Configuration(getGlobalConfiguration()), app.compat,
+        getCommonServicesLocked(app.isolated),
+        mCoreSettingsObserver.getCoreSettingsLocked(),
+        buildSerial, isAutofillCompatEnabled);
+
+</code></pre>
+<p>方法的最终是调用这个方法来进行进程的关联，这里离不开<code>ApplicationThread</code>。我们接着来分析下；</p>
+<h4 id="applicationthread">ApplicationThread</h4>
+<p>可以看到<code>ApplicationThread</code>是<code>ActivityThread</code>的内部类，其是继承了<code>IApplicationThread.Stub</code>。关于跨进程通信中有分析过，对于server端来说。binder是其内部的实体对象，是对于定义的方法的具体实现。既然关键方法是<code>bindApplication()</code>。看一下具体内部实现:</p>
+<pre><code class="language-java">    //省略代码
+    //setCoreSettings 内部是发了一个`H.SET_CORE_SETTINGS`的消息
+    setCoreSettings(coreSettings);
+    //省略代码
+    AppBindData data = new AppBindData();
+    //省略代码  
+    //发送一个`H.BIND_APPLICATION`的消息，并将封装的data作为参数一起传入 
+    sendMessage(H.BIND_APPLICATION, data);
+
+</code></pre>
+<p>可以知道，bindApplication也是通过调用handler的消息机制来发送出来一个消息，具体是通过<code>handleMessage</code>方法来处理。</p>
+<h4 id="handlemesagge">handleMesagge</h4>
+<p>前文有说到，在<code>main</code>方法中已经开启了<code>looper.loop()</code>来进行消息轮询。那么bindApplication中发送了BIND_APPLICATION的消息，那么对应的也会被处理。</p>
+<h5 id="handlebindapplication">handleBindApplication</h5>
+<p>整个bindApplication的方法其实是很长的，这里挑选出来几句关键的代码。</p>
+<pre><code class="language-java">//省略代码
+//获取到`ContextImp`的类加载器，通过loadClass去实例化一个`Instrumentation`。
+final ClassLoader cl = instrContext.getClassLoader();
+mInstrumentation = (Instrumentation)
+    cl.loadClass(data.instrumentationName.getClassName()).newInstance();
+//省略代码 
+//构建一个application的实例对象
+app = data.info.makeApplication(data.restrictedBackupMode, null);
+//省略代码 
+mInitialApplication = app;
+//省略代码
+//调用applicaton的onCreate方法
+mInstrumentation.callApplicationOnCreate(app);
+</code></pre>
+<p>可以看到在创建application的过程中，<code>Instrumentation</code>出现了很多次，并且创建过程也是通过它调用的，那么它究竟是个什么东西呢？</p>
+<h4 id="instrumentation">Instrumentation</h4>
+<p><code>Instrumentation</code>直译过来大概是一个仪器，结合场景可以理解为可以观察的仪表盘。我们先看一下类注释:<br></p>
+<p><em><strong>Instrumentation会在应用程序的任何代码运行之前被实例化，它能够允许你监视应用程序和系统的所有交互</strong>。</em></p>
+<p>通过上文的分析可以知道<code>Instrumentation</code>是在application初始化之前就已经构造了。那么它是怎么实现见识应用程序和系统的交互呢?<br>
+<img src="https://i.loli.net/2019/12/11/Xyfsx21ieLrNzYw.png" alt=""></p>
+<p>查看这个类的方法可以看到，activity包括applicaton的生命周期回调都是通过这个类来进行的。</p>
+<p>这么做的好处在哪里呢？<code>Instrumentation</code>作为抽象，其实是对这个观察仪表盘进行了抽象的功能。其实就是多态的运用。</p>
+<p>既然我们在创建applicaton过程中是调用的<code>Instrumentation</code>中的<code>callApplicatonOnCreate()</code>方法。那么详细来看一下，但是！你会发现内部其实就是调用了一下app的onCreate方法。是不是有点不太对劲。没关系，再来想想：在调用<code>mInstrumentation.callApplicationOnCreate(app)</code>之前，其实是通过<code>data.info.makeApplication(data.restrictedBackupMode, null)</code>来创建一个app实例，data.info其实是<code>loadedApk</code>。</p>
+<h4 id="loadedapk">LoadedApk</h4>
+<p>既然是将Activity的启动流程，activity需要依附于application。我们还是直接来看makeApplicaton的具体实现。</p>
+<pre><code class="language-java">
+java.lang.ClassLoader cl = getClassLoader();
+if (!mPackageName.equals(&quot;android&quot;)) {
+    Trace.traceBegin(Trace.TRACE_TAG_ACTIVITY_MANAGER,
+            &quot;initializeJavaContextClassLoader&quot;);
+    initializeJavaContextClassLoader();
+    Trace.traceEnd(Trace.TRACE_TAG_ACTIVITY_MANAGER);
+}
+ContextImpl appContext = ContextImpl.createAppContext(mActivityThread, this);
+app = mActivityThread.mInstrumentation.newApplication(
+        cl, appClass, appContext);
+</code></pre>
+<p>这里是获取到当前的类加载器，关于<code>ClassLoader</code>的分析已在其他文章中讲过，这里不作具体介绍。然后通过<code>ContextImpl</code>创建出app的上下文，最后通过<code>instrumentation</code>的newApplicaton方法去构造出真正的applicaton实例。</p>
+<p>通过上面的分析我们知道：app还是通过<code>Instrumentation</code>创建的。来看一下具体的方法:</p>
+<pre><code class="language-java">public Application newApplication(ClassLoader cl, String className, Context context)
+        throws InstantiationException, IllegalAccessException, 
+        ClassNotFoundException {
+    Application app = getFactory(context.getPackageName())
+            .instantiateApplication(cl, className);
+    app.attach(context);
+    return app;
+}
+//反射创建applicaton 
+public @NonNull Application instantiateApplication(@NonNull ClassLoader cl,
+        @NonNull String className)
+        throws InstantiationException, IllegalAccessException, ClassNotFoundException {
+    return (Application) cl.loadClass(className).newInstance();
+}
+
+</code></pre>
+<p><code>newApplicaton</code>方法也是真的很简单易懂，首先通过反射创造出实例（注：class.loadClass只是构建出实例，并没有进行初始化，而class.forName会进行初始化，这点可以在源码中发现）。紧接着调用<code>app.attach()</code>方法，内部其实调用了<code>attachBaseContext(context);</code>。这也能解释<mark>为什么<code>attachBaseContext</code>在<code>onCreate</code>之前的问题。</mark></p>
+<h4 id="activity创建">activity创建</h4>
+<p>说完了<code>Application</code>的创建问题，我们再来看一下本文的主题创建activity并启动。<br><br>
+上文的流程图的源码是基于SDK26,本文中是基于28,部分代码已经被google改动过，26中还有LAUNCH_ACTIVITY标识的消息，在28中已经被去除。<br><br>
+既然前文有看到<code>Instrumentation</code>都会观察activity的创建，我们通过反推来看一下activity是怎么被创建出来的。通过源码观察指导是<code>ActivityThread</code>中的<code>performLaunchActivity</code>方法来调用newActivity方法通过反射来生成activity的实例的。在通过一系列的源码追踪，终于能找到activity创建的来龙去脉。</p>
+<ul>
+<li>首先调用<code>handleLaunchActivity()</code>方法</li>
+<li>紧接着调用<code>performLaunchActivity()</code><pre><code class="language-java">    java.lang.ClassLoader cl = appContext.getClassLoader();
+    activity = mInstrumentation.newActivity(
+        cl, component.getClassName(), r.intent);
+    //调用Instrumentation中的newActivity方法
+    public Activity newActivity(ClassLoader cl, String className,
+        Intent intent)
+        throws InstantiationException, IllegalAccessException,
+        ClassNotFoundException {
+    String pkg = intent != null &amp;&amp; intent.getComponent() != null
+            ? intent.getComponent().getPackageName() : null;
+    return getFactory(pkg).instantiateActivity(cl, className, intent);
+}
+//同样通过反射实例化出来activity 
+    public @NonNull Activity instantiateActivity(@NonNull ClassLoader cl, @NonNull String className,
+        @Nullable Intent intent)
+        throws InstantiationException, IllegalAccessException, ClassNotFoundException {
+    return (Activity) cl.loadClass(className).newInstance();
+}
+</code></pre>
+<ul>
+<li>可以看到同样是获取到classLoader，然后通过反射的方式来获取Activity的实例对象。</li>
+</ul>
+</li>
+<li>在<code>performLaunchActivity</code>方法中获取到activity的实例之后，会有一些细节方面的初始化:
+<ul>
+<li>初始化配置，包括fontScale/mcc/mnc等</li>
+<li>初始化Window（Window是Android系统窗口的抽象基类，这个后续文章会分析到）</li>
+<li>调用activity.attach方法
+<ul>
+<li>在attach方法中会将fragment依附在activity中，初始化<code>PhoneWindow</code>，然后设置windowManager,设置键盘输入模式，设置主题色等等。</li>
+</ul>
+</li>
+<li>紧接着就是调用<code>mInstrumentation.callActivityOnCreate</code>来调用activity.onCreate().（顺带提一下，在activity.onCreate()中会调用<code>getApplication().dispatchActivityCreated(this, savedInstanceState);</code>这也是为什么我们可以在applicaton中注册actvity的生命周期回调的原因）</li>
+</ul>
+</li>
+<li>后续就是按照正常的activity的生命周期往下走啦。</li>
+</ul>
+<h4 id="总结">总结</h4>
+<p>上面说了这么多我们来大概总结下整个activity的创建流程(从用户点击桌面上的启动图标开始)</p>
+<ul>
+<li>Android为每个应用都分配了至少一个进程，而进程是通过<code>zygote</code>孵化而来</li>
+<li>java作为Android的实现语言，Android也是保留了Java的特性，程序的主入口为main方法，但是Android并没有暴露出来。</li>
+<li>在<code>ActivityThread</code>的<code>main()</code>方法中，会调用<code>Looper.prepareMainLooper()</code>,然后new出来一个<code>ActivityThread</code>对象，调用attach()方法来将应用与<code>zygote</code>孵化出来的进程绑定。主要流程如下:
+<ul>
+<li>获取到ams的代理实例对象</li>
+<li>调用ams的attachApplicaton方法并传入ApplicaionThread</li>
+<li>在<code>ActivityManagerService</code>中调用<code>attachApplicaton（）</code>实际调用的是applicatonThread的<code>bindApplicaton()</code>方法,在此方法中会发送一个<code>BIND_APPLICATION</code>的消息</li>
+<li>在handleMessage中调用<code>handleBindApplication</code>然后会通过Instrumentation反射出一个app实例。</li>
+<li>紧接着回调attachToBaseContext和onCreate。</li>
+</ul>
+</li>
+<li>activity的创建也是通过instrumentaion中的<code>newActivity</code>方法来进行的，这里同样也是通过反射。</li>
+<li>但是与7.0和8.0的区别在于源码中已经去除LAUNCH_ACTIVITY的消息标识。统一通过RELAUNCH_ACTIVITY标识来进行activity的创建。</li>
+<li>在接收到消息之后还是会调用到<code>handleLaunchActivity</code></li>
+<li>在其中继续调用<code>performLaunchActivity</code>，然后通过反射构建出activity的对象。紧接着调用activity.attach方法来进行一些默认的参数设置。</li>
+<li>最后通过instrumentation回调activity的oncreate方法。（回到的同时也会回调applicaon中注册的activity生命周期监听）</li>
+</ul>
+<p>以上就是大概的activity整体启动流程分析，其中涉及到很多地方都是一笔带过。但是基本上能让人了解activity创建的大概步骤，后续有机会会再开单章对细节进行分析。</p>
+<h4 id="参考资料">参考资料</h4>
+<p><a href="https://juejin.im/entry/58f5b68e61ff4b005807ab47">3分钟看懂Activity启动流程</a></p>
+]]></content>
+    </entry>
     <entry>
         <title type="html"><![CDATA[再学Android：应用启动流程]]></title>
         <id>https://alsowell.github.io//post/zai-xue-androidying-yong-qi-dong-liu-cheng</id>
@@ -2151,208 +2385,6 @@ http 100-continue用于客户端在发送POST数据给服务器前，征询服�
 <p>经过上面的分析我们可以知道：重试拦截器其实内部的逻辑还是有点小复杂的，首先定义了每个请求的最大默认尝试次数。然后在请求没有获取到响应时通过异常类型来判断是否可以继续重试。在获取到响应体阶段则是通过状态吗来判断。这里是不是更好理解：okhttp每个拦截器都是分为了Request阶段和Response阶段。到这里，我们对RetryAndFollowUpInterceptor的分析就告一段落了，下一章将会分析BridgeInterceptor。</p>
 <h4 id="参考资料">参考资料</h4>
 <p><a href="https://juejin.im/post/5aa23fa46fb9a028cb2d3a96">源码分析三：OkHttp—RetryAndFollowUpInterceptor</a></p>
-]]></content>
-    </entry>
-    <entry>
-        <title type="html"><![CDATA[再学Android:OkHttp源码探究(二)getResponseWithInterceptorChain]]></title>
-        <id>https://alsowell.github.io//post/zai-xue-androidokhttp-yuan-ma-tan-jiu-er-getresponsewithinterceptorchain</id>
-        <link href="https://alsowell.github.io//post/zai-xue-androidokhttp-yuan-ma-tan-jiu-er-getresponsewithinterceptorchain">
-        </link>
-        <updated>2019-11-21T03:18:33.000Z</updated>
-        <content type="html"><![CDATA[<h4 id="前言">前言</h4>
-<p>上一篇文章中我们简单的总结了ok发起请求并接收响应的整个流程，我们发现关键步骤是getResponseWithInterceptorChain这个方法。那这里面又做了什么事情呢？还是首先来看一下代码：</p>
-<pre><code class="language-kotlin"> @Throws(IOException::class)
-  fun getResponseWithInterceptorChain(): Response {
-    // Build a full stack of interceptors.
-    val interceptors = mutableListOf&lt;Interceptor&gt;()
-    interceptors += client.interceptors
-    interceptors += RetryAndFollowUpInterceptor(client)
-    interceptors += BridgeInterceptor(client.cookieJar)
-    interceptors += CacheInterceptor(client.cache)
-    interceptors += ConnectInterceptor
-    if (!forWebSocket) {
-      interceptors += client.networkInterceptors
-    }
-    interceptors += CallServerInterceptor(forWebSocket)
-
-    val chain = RealInterceptorChain(interceptors, transmitter, null, 0, originalRequest, this,
-        client.connectTimeoutMillis, client.readTimeoutMillis, client.writeTimeoutMillis)
-
-    var calledNoMoreExchanges = false
-    try {
-      val response = chain.proceed(originalRequest)
-      if (transmitter.isCanceled) {
-        response.closeQuietly()
-        throw IOException(&quot;Canceled&quot;)
-      }
-      return response
-    } catch (e: IOException) {
-      calledNoMoreExchanges = true
-      throw transmitter.noMoreExchanges(e) as Throwable
-    } finally {
-      if (!calledNoMoreExchanges) {
-        transmitter.noMoreExchanges(null)
-      }
-    }
-  }
-</code></pre>
-<p>可以说这个方法是整个okhttp的核心，通过这么几行代码就实现了整个请求的过程。这里不得不提到ok的拦截器机制。大多数人说到okhttp优秀的地方基本上都会脱口而出通过设置拦截器可以很方便的实现网络请求的打印、添加一些公共参数等等。而拦截器真正的运行其实就是在这个方法中。</p>
-<ul>
-<li>首先在interceptors中添加用户自定义的拦截器</li>
-<li>然后按顺序添加各种系统内置的拦截器</li>
-<li>通过RealInterceptorChain方法获取一个chain对象</li>
-<li>通过chain.proceed获取response</li>
-</ul>
-<h4 id="拦截器">拦截器</h4>
-<p>说了这么久的拦截器，肯定会好奇它究竟是个什么妖魔鬼怪：</p>
-<pre><code class="language-kotlin">/**
- * Observes, modifies, and potentially short-circuits requests going out and the corresponding
- * responses coming back in. Typically interceptors add, remove, or transform headers on the request
- * or response.
- */
-interface Interceptor {
-  @Throws(IOException::class)
-  fun intercept(chain: Chain): Response
-
-  companion object {
-    inline operator fun invoke(crossinline block: (chain: Chain) -&gt; Response): Interceptor =
-        object : Interceptor {
-          override fun intercept(chain: Chain) = block(chain)
-        }
-  }
-  interface Chain {
-    fun request(): Request
-
-    @Throws(IOException::class)
-    fun proceed(request: Request): Response
-    fun connection(): Connection?
-    fun call(): Call
-    fun connectTimeoutMillis(): Int
-    fun withConnectTimeout(timeout: Int, unit: TimeUnit): Chain
-    fun readTimeoutMillis(): Int
-    fun withReadTimeout(timeout: Int, unit: TimeUnit): Chain
-    fun writeTimeoutMillis(): Int
-    fun withWriteTimeout(timeout: Int, unit: TimeUnit): Chain
-  }
-}
-
-</code></pre>
-<p>Interceptor实际上是一个接口，里面定义了一个intercept方法和chain的接口类。</p>
-<h5 id="intercept">intercept</h5>
-<p>关于intercept方法是不是很熟悉？我们在自定义拦截器的时候往往都是在这里面做一些瞎操作。</p>
-<pre><code class="language-kotlin">   override fun intercept(chain: Interceptor.Chain): Response {
-        val request = chain.request()
-        val realInterceptorChain = chain as RealInterceptorChain
-        val transmitter = realInterceptorChain.transmitter()
-        val response = realInterceptorChain.proceed(request, transmitter, null)
-        return response
-
-    }
-</code></pre>
-<ul>
-<li>这里首先是通过chain.request获取请求的request对象</li>
-<li>通过chain.proceed 递归调用下一个拦截器的intercept方法</li>
-<li>最终返回chain.proceed的response到上一级拦截器</li>
-</ul>
-<h5 id="分层">分层</h5>
-<p>这里其实是将每个拦截器分为了两个阶段：</p>
-<ul>
-<li>Request阶段：执行该拦截器在请求前做的事，例如：bridgeInterceptor添加一些请求参数</li>
-<li>Response阶段：执行拦截器在获取响应之后做的事，例如：打印出请求体的返回</li>
-</ul>
-<p>拦截器的设计其实是采用了递归调用的思想，仔细想想其实是非常巧妙的，这样可以保证不论是系统内置还是用户自定义的拦截器都可以得到最终执行。如果在某个拦截器中出现了错误，还可以把错误抛给上一层来处理。</p>
-<h5 id="内置拦截器">内置拦截器</h5>
-<p>通过剖析源码我们会发现,ok内部其实是帮我们内置了好几种拦截器，每次请求都会添加进去，我们按照添加顺序整理如下：</p>
-<table>
-<thead>
-<tr>
-<th style="text-align:center">拦截器</th>
-<th style="text-align:center">说明</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td style="text-align:center">RetryAndFollowUpInterceptor</td>
-<td style="text-align:center">负责实现重定向功能</td>
-</tr>
-<tr>
-<td style="text-align:center">BridgeInterceptor</td>
-<td style="text-align:center">将用户构造的请求转换为向服务器发送的请求，将服务器返回的响应转换为对用户友好的响应</td>
-</tr>
-<tr>
-<td style="text-align:center">CacheInterceptor</td>
-<td style="text-align:center">读取缓存、更新缓存</td>
-</tr>
-<tr>
-<td style="text-align:center">ConnectInterceptor</td>
-<td style="text-align:center">建立与服务器的连接</td>
-</tr>
-<tr>
-<td style="text-align:center">CallServerInterceptor</td>
-<td style="text-align:center">从服务器读取响应</td>
-</tr>
-</tbody>
-</table>
-<p>可以看出，整个网络请求的过程是通过各个拦截器相互配合来实现，假如我们在网络请求过程中设置允许缓存，那么在请求网络之前会预先获取缓存，然后再去跟服务器建立连接。通过拦截器的机制，我们可以很方便的控制整个网络请求的过程以及添加我们自己的拓展。</p>
-<p>整个网络请求过程中，用户其实是可以添加两种不同类型的拦截器的。</p>
-<ul>
-<li>通过 addInterceptor()在网络请求前后添加拦截器</li>
-<li>通过networkInterceptors()在获取响应前后添加拦截器</li>
-</ul>
-<p>这一点在getResponseWithInterceptorChain（）方法中添加拦截器的顺序是可以分析出来的。</p>
-<h5 id="整体流程">整体流程</h5>
-<p><img src="https://user-gold-cdn.xitu.io/2019/11/21/16e8bf6522fc07a5?w=1064&amp;h=1004&amp;f=jpeg&amp;s=89681" alt=""><br>
-图片来源:https://blog.n0texpecterr0r.cn/?p=717</p>
-<h4 id="realinterceptorchain">RealInterceptorChain</h4>
-<p>经过上面的分析我们知道okhttp的实际请求和响应过程是通过一个个拦截器的递归调用来实现的。主要方法就是</p>
-<p>realInterceptorChain.proceed。我们先来看一下RealInterceptorChain的构造方法</p>
-<pre><code class="language-kotlin">class RealInterceptorChain(
-  private val interceptors: List&lt;Interceptor&gt;,
-  private val transmitter: Transmitter,
-  private val exchange: Exchange?,
-  private val index: Int,
-  private val request: Request,
-  private val call: Call,
-  private val connectTimeout: Int,
-  private val readTimeout: Int,
-  private val writeTimeout: Int
-) 
-</code></pre>
-<p>这里其实是将上一个拦截器的一些参数传递进来并且赋值的简单实现。包括所有的拦截器、以及我们在第一篇文章提到的transmitter等。整个类中最关键的还是proceed方法</p>
-<pre><code class="language-kotlin">  @Throws(IOException::class)
-  fun proceed(request: Request, transmitter: Transmitter, exchange: Exchange?): Response {
-    if (index &gt;= interceptors.size) throw AssertionError()
-    calls++
-    // If we already have a stream, confirm that the incoming request will use it.
-    check(this.exchange == null || this.exchange.connection()!!.supportsUrl(request.url)) {
-      &quot;network interceptor ${interceptors[index - 1]} must retain the same host and port&quot;
-    }
-    // If we already have a stream, confirm that this is the only call to chain.proceed().
-    check(this.exchange == null || calls &lt;= 1) {
-      &quot;network interceptor ${interceptors[index - 1]} must call proceed() exactly once&quot;
-    }
-    // Call the next interceptor in the chain.
-    val next = RealInterceptorChain(interceptors, transmitter, exchange,
-        index + 1, request, call, connectTimeout, readTimeout, writeTimeout)
-    val interceptor = interceptors[index]
-    @Suppress(&quot;USELESS_ELVIS&quot;)
-    val response = interceptor.intercept(next) ?: throw NullPointerException(
-        &quot;interceptor $interceptor returned null&quot;)
-    // Confirm that the next interceptor made its required call to chain.proceed().
-    check(exchange == null || index + 1 &gt;= interceptors.size || next.calls == 1) {
-      &quot;network interceptor $interceptor must call proceed() exactly once&quot;
-    }
-    check(response.body != null) { &quot;interceptor $interceptor returned a response with no body&quot; }
-    return response
-  }
-</code></pre>
-<p>可以看到这个方法中除了大量的判读逻辑，比较关键的就是通过index+1取到下一个RealInterceptorChain对象 。</p>
-<p>然后获取当前的拦截器并且调用其intercept方法 ，方法参数中传入了下一个拦截器的对应的chain。就是这样通过递归调用的设计，实现了由上而下，再由下而上实现了递与归的过程。从而非常漂亮的实现了http请求的全链路。</p>
-<p>看到这里有没有觉得这种设计模式很熟悉，没错就是责任链模式。这种设计模式在一个流程会有多种操作的业务场景下会非常实用。</p>
-<h4 id="总结">总结</h4>
-<p>本篇文章我们主要是分析了整个网络请求过程中非常重要的getResponseWithInterceptorChain()方法，内部通过责任链的模式递归调用用户自定义拦截器和内置拦截器来完成整个网络请求。通过对整个方法的分析，我们会更清晰的知道ok内部是怎么实现通过设置拦截器来完成我们想要的功能的。同时也是我们学习责任链模式非常好的实践。后续文章将逐个分析ok内置拦截器的具体作用。</p>
-<h2 id="参考资料">参考资料</h2>
-<p><a href="https://blog.n0texpecterr0r.cn/?p=717">OkHttp 源码剖析系列（一）——请求的发起及拦截器机制概述</a></p>
 ]]></content>
     </entry>
 </feed>
