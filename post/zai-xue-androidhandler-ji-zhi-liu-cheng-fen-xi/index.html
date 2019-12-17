@@ -1,0 +1,463 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" >
+
+<title>再学Android：handler机制流程分析 | ALSOWELL`Blog</title>
+<meta name="description" content="Never Stop">
+
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+
+<link rel="stylesheet" href="https://use.fontawesome.com/releases/v5.7.2/css/all.css" integrity="sha384-fnmOCqbTlWIlj8LyTjo7mOUStjsKC4pOpQbqyi7RrhN7udi9RwhKkMHpvLbHG9Sr" crossorigin="anonymous">
+<link rel="shortcut icon" href="https://alsowell.github.io//favicon.ico?v=1576573196992">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.10.0/katex.min.css">
+<link rel="stylesheet" href="https://alsowell.github.io//styles/main.css">
+
+
+
+<script src="https://cdn.jsdelivr.net/npm/vue/dist/vue.js"></script>
+<script src="https://cdn.bootcss.com/highlight.js/9.12.0/highlight.min.js"></script>
+
+<link rel="stylesheet" href="https://unpkg.com/aos@next/dist/aos.css" />
+
+
+
+  </head>
+  <body>
+    <div id="app" class="main">
+
+      <div class="sidebar" :class="{ 'full-height': menuVisible }">
+  <div class="top-container" data-aos="fade-right">
+    <div class="top-header-container">
+      <a class="site-title-container" href="https://alsowell.github.io/">
+        <img src="https://alsowell.github.io//images/avatar.png?v=1576573196992" class="site-logo">
+        <h1 class="site-title">ALSOWELL`Blog</h1>
+      </a>
+      <div class="menu-btn" @click="menuVisible = !menuVisible">
+        <div class="line"></div>
+      </div>
+    </div>
+    <div>
+      
+        
+          <a href="/" class="site-nav">
+            首页
+          </a>
+        
+      
+        
+          <a href="/archives" class="site-nav">
+            归档
+          </a>
+        
+      
+        
+          <a href="/tags" class="site-nav">
+            标签
+          </a>
+        
+      
+        
+          <a href="/post/about" class="site-nav">
+            关于
+          </a>
+        
+      
+    </div>
+  </div>
+  <div class="bottom-container" data-aos="flip-up" data-aos-offset="0">
+    <div class="social-container">
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    </div>
+    <div class="site-description">
+      Never Stop
+    </div>
+    <div class="site-footer">
+      Powered by <a href="https://github.com/getgridea/gridea" target="_blank">Gridea</a> | <a class="rss" href="https://alsowell.github.io//atom.xml" target="_blank">RSS</a>
+    </div>
+  </div>
+</div>
+
+
+      <div class="main-container">
+        <div class="content-container" data-aos="fade-up">
+          <div class="post-detail">
+            <h2 class="post-title">再学Android：handler机制流程分析</h2>
+            <div class="post-date">2019-12-17</div>
+            
+            <div class="post-content">
+              <h4 id="前言">前言</h4>
+<p><code>Handler</code>对于Android开发者来说都不陌生，其本身是Android自带的内部消息机制，通过构建一个<code>Message</code>对象，获取到handler，然后sendMessage这样就可以很方便的做到线程间的通信。那么其内部究竟怎么实现的，今天就来瞅一瞅。</p>
+<h4 id="handler">Handler</h4>
+<p><code>Handler</code>其实并不复杂，其源码也仅仅只有不到1000行，相对于View几万行的源码，真的算是小巫见大巫了。首先来看一下类注释：</p>
+<table><tr><td bgcolor="#f7f6f3">
+对于handler来说主要有两个用途:<br>
+1.循环执行任务。<br>
+2.执行与当前线程不同的线程发送过来的指令，也就是线程间的通信
+</td></tr></table>
+<h5 id="关于使用">关于使用</h5>
+<p>还是从使用来进行分析:</p>
+<pre><code class="language-kotlin">    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        setContentView(R.layout.activity_main)
+        val handler = MyHandler(WeakReference(this))
+        val message = Message()
+        message.what = 1
+        message.obj = &quot;test&quot;
+        handler.sendMessage(message)
+    }
+        private class MyHandler(val activity: WeakReference&lt;Activity&gt;) : Handler() {
+        override fun handleMessage(msg: Message) {
+            super.handleMessage(msg)
+            when (msg.what) {
+                1 -&gt; {
+                    val get = activity.get()
+                    get?.runOnUiThread {
+                        Toast.makeText(get, msg.obj.toString(), Toast.LENGTH_SHORT).show()
+                    }
+                }
+                else -&gt; {
+                }
+            }
+        }
+    }
+</code></pre>
+<p>可以看到，关于handler的使用也是非常简单的，在Activity的<code>onCreate()</code>方法中会初始化一个自定义的handler对象，然后构造一个message对象，紧接着通过<code>sendMessage()</code>方法去发送，然后在我们自定义的匿名静态内部类中去处理这个消息。至于为什么在activity中我们使用的是匿名静态内部类的方式，其实是如果handler使用不当会造成内存的泄漏。</p>
+<p>其实除了sendMessage之外，handler还可以post一个<code>runnable</code>。但是你观察源码会发现其内部都是通过调用senMessaggeAtTime的方法。后面我们会详细分析，接下来会先从构造开始。</p>
+<h5 id="初始化handler">初始化handler</h5>
+<pre><code class="language-java">    public Handler(Callback callback, boolean async) {
+        if (FIND_POTENTIAL_LEAKS) {
+            final Class&lt;? extends Handler&gt; klass = getClass();
+            if ((klass.isAnonymousClass() || klass.isMemberClass() || klass.isLocalClass()) &amp;&amp;
+                    (klass.getModifiers() &amp; Modifier.STATIC) == 0) {
+                Log.w(TAG, &quot;The following Handler class should be static or leaks might occur: &quot; +
+                    klass.getCanonicalName());
+            }
+        }
+
+        mLooper = Looper.myLooper();
+        if (mLooper == null) {
+            throw new RuntimeException(
+                &quot;Can't create handler inside thread &quot; + Thread.currentThread()
+                        + &quot; that has not called Looper.prepare()&quot;);
+        }
+        mQueue = mLooper.mQueue;
+        mCallback = callback;
+        mAsynchronous = async;
+    }
+</code></pre>
+<p>可以看到，handler在初始化的时候首先会对调用者的使用方式进行判断，比方说我们直接在activity中去初始化一个<code>handler</code>但是并没有在静态匿名内部类中去接收消息，那么就有可能造成内存泄漏，因为会持有activity的应用，导致并没有被销毁。仅接着通过<code>Looper.myLooper()</code>拿到当前线程的looper对象，如果looper为null会直接抛出异常。</p>
+<p>关于Looper，这里有两个点:</p>
+<ul>
+<li>我们在子线程中使用handler中需要手动调用looper.prepare和looper.loop 这样才能进行消息的循环。</li>
+<li>而在主线程中我们可以直接使用的原因是应用在启动的时候，在<code>ActivityThread</code>的main方法中系统已经调用过looper.prepareMainLooper方法和loop方法。</li>
+</ul>
+<p>回到handler的初始化，接着就是将looper中的MessageQueue对象赋值到当前，以及一些其他参数的设置。到这里关于handler的初始化就已经完成了。</p>
+<h5 id="looper">Looper</h5>
+<p>上文有说到looper，handler的使用必须保证当前线程的looper已经被prepare并且loop方法也被调用。因为handler的核心就是一个死循环，不断的从队列中取出任务，关于这点后面会讲到。</p>
+<p>还是来看一下<code>Looper</code>的类注释：</p>
+<table><tr><td bgcolor="#f7f6f3">
+一个用来做线程内消息循环的类，线程默认并没有一个looper对象与之管理，通过prepare去创建一个looper对象，然后通过loop方法去进行消息循环，知道线程终止。
+</td></tr></table>
+<h5 id="looperprepare">Looper.prepare()</h5>
+<pre><code class="language-java">    private static void prepare(boolean quitAllowed) {
+        if (sThreadLocal.get() != null) {
+            throw new RuntimeException(&quot;Only one Looper may be created per thread&quot;);
+        }
+        sThreadLocal.set(new Looper(quitAllowed));
+    }
+    
+        private Looper(boolean quitAllowed) {
+        mQueue = new MessageQueue(quitAllowed);
+        mThread = Thread.currentThread();
+    }
+</code></pre>
+<p>prepare的时候首先会通过threadLocal去判断当前是否已经存在一个looper对象，每个线程都只允许存在一个looper。<a href="http://www.jasongj.com/java/threadlocal/">关于ThreadLocal</a>。紧接着通过new looper的方式去初始化实例，并将其放入到threadLocal中。在初始化的时候也会去初始化一个MessageQueue对象。</p>
+<h5 id="looperloop">Looper.loop()</h5>
+<pre><code class="language-java">        for (;;) {
+            //暂时去除代码
+        }
+</code></pre>
+<p>loop方法中有一个很重要的地方，就是这里的死循环，这里会不断的通过Message的next方法去取出需要执行的任务。关于相似分析见下文。我们先按照调用顺序来进行分析</p>
+<h4 id="sendmessageattime">sendMessageAtTime()</h4>
+<p>上文中有说到，不管是调用sendMessage还是post(runnable run)方法最终都是会调用handler中的sendMessageAtTime方法，读者可以自己看一下，这里就不截图了。</p>
+<pre><code class="language-java">    public boolean sendMessageAtTime(Message msg, long uptimeMillis) {
+        MessageQueue queue = mQueue;
+        if (queue == null) {
+            RuntimeException e = new RuntimeException(
+                    this + &quot; sendMessageAtTime() called with no mQueue&quot;);
+            Log.w(&quot;Looper&quot;, e.getMessage(), e);
+            return false;
+        }
+        return enqueueMessage(queue, msg, uptimeMillis);
+    }
+</code></pre>
+<p>这里的代码也是很简单啊，拿到MessageQueue对象进行了一次判断是否为null。然后调用enqueueMessage方法，哦 这里的Boolean返回值为是否成功将消息添加到队列的意思。再补充一下，当通过handler.post调用时，内部会构造一个Message对象，然后将runnable放入到Message中继续后面的步骤。</p>
+<h5 id="enqueuemessage">enqueueMessage</h5>
+<pre><code class="language-java">    private boolean enqueueMessage(MessageQueue queue, Message msg, long uptimeMillis) {
+        msg.target = this;
+        if (mAsynchronous) {
+            msg.setAsynchronous(true);
+        }
+        return queue.enqueueMessage(msg, uptimeMillis);
+    }
+</code></pre>
+<p>enqueueMessage内部也只是调用MessageQueue的enqueueMessage方法。</p>
+<pre><code class="language-java">    boolean enqueueMessage(Message msg, long when) {
+        if (msg.target == null) {
+            throw new IllegalArgumentException(&quot;Message must have a target.&quot;);
+        }
+        if (msg.isInUse()) {
+            throw new IllegalStateException(msg + &quot; This message is already in use.&quot;);
+        }
+
+        synchronized (this) {
+            if (mQuitting) {
+                IllegalStateException e = new IllegalStateException(
+                        msg.target + &quot; sending message to a Handler on a dead thread&quot;);
+                Log.w(TAG, e.getMessage(), e);
+                msg.recycle();
+                return false;
+            }
+
+            msg.markInUse();
+            msg.when = when;
+            Message p = mMessages;
+            boolean needWake;
+            if (p == null || when == 0 || when &lt; p.when) {
+                // New head, wake up the event queue if blocked.
+                msg.next = p;
+                mMessages = msg;
+                needWake = mBlocked;
+            } else {
+                // Inserted within the middle of the queue.  Usually we don't have to wake
+                // up the event queue unless there is a barrier at the head of the queue
+                // and the message is the earliest asynchronous message in the queue.
+                needWake = mBlocked &amp;&amp; p.target == null &amp;&amp; msg.isAsynchronous();
+                Message prev;
+                for (;;) {
+                    prev = p;
+                    p = p.next;
+                    if (p == null || when &lt; p.when) {
+                        break;
+                    }
+                    if (needWake &amp;&amp; p.isAsynchronous()) {
+                        needWake = false;
+                    }
+                }
+                msg.next = p; // invariant: p == prev.next
+                prev.next = msg;
+            }
+
+            // We can assume mPtr != 0 because mQuitting is false.
+            if (needWake) {
+                nativeWake(mPtr);
+            }
+        }
+        return true;
+    }
+</code></pre>
+<p>说了这么久终于要进入关键步骤了。</p>
+<ul>
+<li>
+<p>首先判断是否有target，target默认是当前的looper对象</p>
+</li>
+<li>
+<p>判断是否是已经放进来过。如果已经存入就抛出异常</p>
+</li>
+<li>
+<p>使用<code>synchronized</code>来进行线程同步</p>
+</li>
+<li>
+<p>接着判断当前thread是否已经处于dead的状态</p>
+</li>
+<li>
+<p>把当前的Message标记为use状态</p>
+</li>
+<li>
+<p>给Message设置执行时间。</p>
+<ul>
+<li>注意这个执行时间并不是系统当前的时间而是SystemClock.uptimeMillis()，其是系统开机到目前的时间，期间不包括休眠的时间，这里获得的时间是一个相对的时间。使用这种方式而不是当前时间是因为handler会受到阻塞、挂起、睡眠等待。这种情况下，delay的事件时不应该被执行的</li>
+</ul>
+</li>
+<li>
+<p>先判断当前有没有任务正在执行或者当前是个需要马上被执行的消息、或者当前的消息比马上正要执行的消息的when要小。</p>
+<ul>
+<li>上面可能有点难以理解，大家可以想一下，我们使用handler的过程中可能会post很多延时消息同时也会直接send一个message，如果Post在send之前调用，那么MessageQueue内部就需要判断在同一个线程中的任务的执行顺序。</li>
+</ul>
+</li>
+<li>
+<p>如果没有满足上面的条件，那么就把当前的消息根据when的大小来进行排序插入到当前的链表中。</p>
+</li>
+<li>
+<p>然后通过needWake参数来判断是否需要唤醒执行任务。</p>
+</li>
+</ul>
+<p>以上就是整个将Message添加到队列中的全部过程。</p>
+<h4 id="消息的分发">消息的分发</h4>
+<p>经过上文的分析我们知道handler是通过looper的loop方法从MessageQueue中取到需要执行的任务，然后执行。那么就来看一下具体实现：</p>
+<pre><code class="language-java">        for (;;) {
+            Message msg = queue.next(); // might block
+            if (msg == null) {
+                // No message indicates that the message queue is quitting.
+                return;
+            }
+
+            // This must be in a local variable, in case a UI event sets the logger
+            final Printer logging = me.mLogging;
+            if (logging != null) {
+                logging.println(&quot;&gt;&gt;&gt;&gt;&gt; Dispatching to &quot; + msg.target + &quot; &quot; +
+                        msg.callback + &quot;: &quot; + msg.what);
+            }
+
+            final long traceTag = me.mTraceTag;
+            long slowDispatchThresholdMs = me.mSlowDispatchThresholdMs;
+            long slowDeliveryThresholdMs = me.mSlowDeliveryThresholdMs;
+            if (thresholdOverride &gt; 0) {
+                slowDispatchThresholdMs = thresholdOverride;
+                slowDeliveryThresholdMs = thresholdOverride;
+            }
+            final boolean logSlowDelivery = (slowDeliveryThresholdMs &gt; 0) &amp;&amp; (msg.when &gt; 0);
+            final boolean logSlowDispatch = (slowDispatchThresholdMs &gt; 0);
+
+            final boolean needStartTime = logSlowDelivery || logSlowDispatch;
+            final boolean needEndTime = logSlowDispatch;
+
+            if (traceTag != 0 &amp;&amp; Trace.isTagEnabled(traceTag)) {
+                Trace.traceBegin(traceTag, msg.target.getTraceName(msg));
+            }
+
+            final long dispatchStart = needStartTime ? SystemClock.uptimeMillis() : 0;
+            final long dispatchEnd;
+            try {
+                msg.target.dispatchMessage(msg);
+                dispatchEnd = needEndTime ? SystemClock.uptimeMillis() : 0;
+            } finally {
+                if (traceTag != 0) {
+                    Trace.traceEnd(traceTag);
+                }
+            }
+            if (logSlowDelivery) {
+                if (slowDeliveryDetected) {
+                    if ((dispatchStart - msg.when) &lt;= 10) {
+                        Slog.w(TAG, &quot;Drained&quot;);
+                        slowDeliveryDetected = false;
+                    }
+                } else {
+                    if (showSlowLog(slowDeliveryThresholdMs, msg.when, dispatchStart, &quot;delivery&quot;,
+                            msg)) {
+                        // Once we write a slow delivery log, suppress until the queue drains.
+                        slowDeliveryDetected = true;
+                    }
+                }
+            }
+            if (logSlowDispatch) {
+                showSlowLog(slowDispatchThresholdMs, dispatchStart, dispatchEnd, &quot;dispatch&quot;, msg);
+            }
+
+            if (logging != null) {
+                logging.println(&quot;&lt;&lt;&lt;&lt;&lt; Finished to &quot; + msg.target + &quot; &quot; + msg.callback);
+            }
+
+            // Make sure that during the course of dispatching the
+            // identity of the thread wasn't corrupted.
+            final long newIdent = Binder.clearCallingIdentity();
+            if (ident != newIdent) {
+                Log.wtf(TAG, &quot;Thread identity changed from 0x&quot;
+                        + Long.toHexString(ident) + &quot; to 0x&quot;
+                        + Long.toHexString(newIdent) + &quot; while dispatching to &quot;
+                        + msg.target.getClass().getName() + &quot; &quot;
+                        + msg.callback + &quot; what=&quot; + msg.what);
+            }
+
+            msg.recycleUnchecked();
+        }
+</code></pre>
+<p>首先通过queue.next方法取出一个任务，然后通过<code>msg.target.dispatchMessage(msg);</code>进行消息的分发；整个过程好像是非常简单的。这里有几个点比较有意思</p>
+<ul>
+<li>在进行消息分发的前后会通过<code>SystemClock.uptimeMillis()</code>来获取到系统开机到目前的时间(不包括被阻塞和挂起的时间)来进行必要的日志输出。</li>
+<li>最终将已经分发过的消息进行recycle</li>
+</ul>
+<h4 id="总结">总结</h4>
+<p>以上就是整个handler的大概流程分析，当然可能还存在一些不严谨的地方，只是作为本人对于handler理解的一些记录。如果有错误的地方，希望海涵。</p>
+<h4 id="拓展">拓展:</h4>
+<h5 id="为什么handlerpostdelay方法不会造成anr呢">为什么handler.postDelay方法不会造成ANR呢？</h5>
+<ul>
+<li>Looper.loop( )是会让主线程进入死循环。但是不会卡主程序，卡住程序主要是handleMessage处理消息的时候来不及处理导致的。Android的消息处理机制是事件驱动型的。</li>
+</ul>
+<h5 id="应用在使用过程中发生了anr-是发生在哪个方法">应用在使用过程中发生了ANR 是发生在哪个方法？</h5>
+<ul>
+<li>通过上面的分析，消息的分发都是通过dispatchMessage来做的，所以如果发生了anr都会在这里产生。</li>
+</ul>
+<h4 id="参考资料">参考资料</h4>
+<p><a href="http://www.jasongj.com/java/threadlocal/">Java进阶（七）正确理解Thread Local的原理与适用场景</a></p>
+
+            </div>
+            
+              <div class="tag-container">
+                
+                  <a href="https://alsowell.github.io//tag/mQjRv9Sm0" class="tag">
+                    Handler
+                  </a>
+                
+                  <a href="https://alsowell.github.io//tag/KvUFmkrCfo" class="tag">
+                    looper
+                  </a>
+                
+                  <a href="https://alsowell.github.io//tag/android" class="tag">
+                    Android
+                  </a>
+                
+              </div>
+            
+            
+              <div class="next-post">
+                <div class="next">下一篇</div>
+                <a href="https://alsowell.github.io//post/zai-xue-androidactivity-qi-dong-liu-cheng">
+                  <h3 class="post-title">
+                    再学Android：Activity启动流程
+                  </h3>
+                </a>
+              </div>
+            
+
+            
+
+          </div>
+
+        </div>
+      </div>
+    </div>
+
+    <script src="https://unpkg.com/aos@next/dist/aos.js"></script>
+
+<script type="application/javascript">
+
+AOS.init();
+
+hljs.initHighlightingOnLoad()
+
+var app = new Vue({
+  el: '#app',
+  data: {
+    menuVisible: false,
+  },
+})
+
+</script>
+
+
+
+
+  </body>
+</html>

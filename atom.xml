@@ -2,7 +2,7 @@
 <feed xmlns="http://www.w3.org/2005/Atom">
     <id>https://alsowell.github.io/</id>
     <title>ALSOWELL`Blog</title>
-    <updated>2019-12-11T07:13:28.587Z</updated>
+    <updated>2019-12-17T09:00:10.687Z</updated>
     <generator>https://github.com/jpmonette/feed</generator>
     <link rel="alternate" href="https://alsowell.github.io/"/>
     <link rel="self" href="https://alsowell.github.io//atom.xml"/>
@@ -10,6 +10,319 @@
     <logo>https://alsowell.github.io//images/avatar.png</logo>
     <icon>https://alsowell.github.io//favicon.ico</icon>
     <rights>All rights reserved 2019, ALSOWELL`Blog</rights>
+    <entry>
+        <title type="html"><![CDATA[再学Android：handler机制流程分析]]></title>
+        <id>https://alsowell.github.io//post/zai-xue-androidhandler-ji-zhi-liu-cheng-fen-xi</id>
+        <link href="https://alsowell.github.io//post/zai-xue-androidhandler-ji-zhi-liu-cheng-fen-xi">
+        </link>
+        <updated>2019-12-17T08:59:05.000Z</updated>
+        <content type="html"><![CDATA[<h4 id="前言">前言</h4>
+<p><code>Handler</code>对于Android开发者来说都不陌生，其本身是Android自带的内部消息机制，通过构建一个<code>Message</code>对象，获取到handler，然后sendMessage这样就可以很方便的做到线程间的通信。那么其内部究竟怎么实现的，今天就来瞅一瞅。</p>
+<h4 id="handler">Handler</h4>
+<p><code>Handler</code>其实并不复杂，其源码也仅仅只有不到1000行，相对于View几万行的源码，真的算是小巫见大巫了。首先来看一下类注释：</p>
+<table><tr><td bgcolor="#f7f6f3">
+对于handler来说主要有两个用途:<br>
+1.循环执行任务。<br>
+2.执行与当前线程不同的线程发送过来的指令，也就是线程间的通信
+</td></tr></table>
+<h5 id="关于使用">关于使用</h5>
+<p>还是从使用来进行分析:</p>
+<pre><code class="language-kotlin">    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        setContentView(R.layout.activity_main)
+        val handler = MyHandler(WeakReference(this))
+        val message = Message()
+        message.what = 1
+        message.obj = &quot;test&quot;
+        handler.sendMessage(message)
+    }
+        private class MyHandler(val activity: WeakReference&lt;Activity&gt;) : Handler() {
+        override fun handleMessage(msg: Message) {
+            super.handleMessage(msg)
+            when (msg.what) {
+                1 -&gt; {
+                    val get = activity.get()
+                    get?.runOnUiThread {
+                        Toast.makeText(get, msg.obj.toString(), Toast.LENGTH_SHORT).show()
+                    }
+                }
+                else -&gt; {
+                }
+            }
+        }
+    }
+</code></pre>
+<p>可以看到，关于handler的使用也是非常简单的，在Activity的<code>onCreate()</code>方法中会初始化一个自定义的handler对象，然后构造一个message对象，紧接着通过<code>sendMessage()</code>方法去发送，然后在我们自定义的匿名静态内部类中去处理这个消息。至于为什么在activity中我们使用的是匿名静态内部类的方式，其实是如果handler使用不当会造成内存的泄漏。</p>
+<p>其实除了sendMessage之外，handler还可以post一个<code>runnable</code>。但是你观察源码会发现其内部都是通过调用senMessaggeAtTime的方法。后面我们会详细分析，接下来会先从构造开始。</p>
+<h5 id="初始化handler">初始化handler</h5>
+<pre><code class="language-java">    public Handler(Callback callback, boolean async) {
+        if (FIND_POTENTIAL_LEAKS) {
+            final Class&lt;? extends Handler&gt; klass = getClass();
+            if ((klass.isAnonymousClass() || klass.isMemberClass() || klass.isLocalClass()) &amp;&amp;
+                    (klass.getModifiers() &amp; Modifier.STATIC) == 0) {
+                Log.w(TAG, &quot;The following Handler class should be static or leaks might occur: &quot; +
+                    klass.getCanonicalName());
+            }
+        }
+
+        mLooper = Looper.myLooper();
+        if (mLooper == null) {
+            throw new RuntimeException(
+                &quot;Can't create handler inside thread &quot; + Thread.currentThread()
+                        + &quot; that has not called Looper.prepare()&quot;);
+        }
+        mQueue = mLooper.mQueue;
+        mCallback = callback;
+        mAsynchronous = async;
+    }
+</code></pre>
+<p>可以看到，handler在初始化的时候首先会对调用者的使用方式进行判断，比方说我们直接在activity中去初始化一个<code>handler</code>但是并没有在静态匿名内部类中去接收消息，那么就有可能造成内存泄漏，因为会持有activity的应用，导致并没有被销毁。仅接着通过<code>Looper.myLooper()</code>拿到当前线程的looper对象，如果looper为null会直接抛出异常。</p>
+<p>关于Looper，这里有两个点:</p>
+<ul>
+<li>我们在子线程中使用handler中需要手动调用looper.prepare和looper.loop 这样才能进行消息的循环。</li>
+<li>而在主线程中我们可以直接使用的原因是应用在启动的时候，在<code>ActivityThread</code>的main方法中系统已经调用过looper.prepareMainLooper方法和loop方法。</li>
+</ul>
+<p>回到handler的初始化，接着就是将looper中的MessageQueue对象赋值到当前，以及一些其他参数的设置。到这里关于handler的初始化就已经完成了。</p>
+<h5 id="looper">Looper</h5>
+<p>上文有说到looper，handler的使用必须保证当前线程的looper已经被prepare并且loop方法也被调用。因为handler的核心就是一个死循环，不断的从队列中取出任务，关于这点后面会讲到。</p>
+<p>还是来看一下<code>Looper</code>的类注释：</p>
+<table><tr><td bgcolor="#f7f6f3">
+一个用来做线程内消息循环的类，线程默认并没有一个looper对象与之管理，通过prepare去创建一个looper对象，然后通过loop方法去进行消息循环，知道线程终止。
+</td></tr></table>
+<h5 id="looperprepare">Looper.prepare()</h5>
+<pre><code class="language-java">    private static void prepare(boolean quitAllowed) {
+        if (sThreadLocal.get() != null) {
+            throw new RuntimeException(&quot;Only one Looper may be created per thread&quot;);
+        }
+        sThreadLocal.set(new Looper(quitAllowed));
+    }
+    
+        private Looper(boolean quitAllowed) {
+        mQueue = new MessageQueue(quitAllowed);
+        mThread = Thread.currentThread();
+    }
+</code></pre>
+<p>prepare的时候首先会通过threadLocal去判断当前是否已经存在一个looper对象，每个线程都只允许存在一个looper。<a href="http://www.jasongj.com/java/threadlocal/">关于ThreadLocal</a>。紧接着通过new looper的方式去初始化实例，并将其放入到threadLocal中。在初始化的时候也会去初始化一个MessageQueue对象。</p>
+<h5 id="looperloop">Looper.loop()</h5>
+<pre><code class="language-java">        for (;;) {
+            //暂时去除代码
+        }
+</code></pre>
+<p>loop方法中有一个很重要的地方，就是这里的死循环，这里会不断的通过Message的next方法去取出需要执行的任务。关于相似分析见下文。我们先按照调用顺序来进行分析</p>
+<h4 id="sendmessageattime">sendMessageAtTime()</h4>
+<p>上文中有说到，不管是调用sendMessage还是post(runnable run)方法最终都是会调用handler中的sendMessageAtTime方法，读者可以自己看一下，这里就不截图了。</p>
+<pre><code class="language-java">    public boolean sendMessageAtTime(Message msg, long uptimeMillis) {
+        MessageQueue queue = mQueue;
+        if (queue == null) {
+            RuntimeException e = new RuntimeException(
+                    this + &quot; sendMessageAtTime() called with no mQueue&quot;);
+            Log.w(&quot;Looper&quot;, e.getMessage(), e);
+            return false;
+        }
+        return enqueueMessage(queue, msg, uptimeMillis);
+    }
+</code></pre>
+<p>这里的代码也是很简单啊，拿到MessageQueue对象进行了一次判断是否为null。然后调用enqueueMessage方法，哦 这里的Boolean返回值为是否成功将消息添加到队列的意思。再补充一下，当通过handler.post调用时，内部会构造一个Message对象，然后将runnable放入到Message中继续后面的步骤。</p>
+<h5 id="enqueuemessage">enqueueMessage</h5>
+<pre><code class="language-java">    private boolean enqueueMessage(MessageQueue queue, Message msg, long uptimeMillis) {
+        msg.target = this;
+        if (mAsynchronous) {
+            msg.setAsynchronous(true);
+        }
+        return queue.enqueueMessage(msg, uptimeMillis);
+    }
+</code></pre>
+<p>enqueueMessage内部也只是调用MessageQueue的enqueueMessage方法。</p>
+<pre><code class="language-java">    boolean enqueueMessage(Message msg, long when) {
+        if (msg.target == null) {
+            throw new IllegalArgumentException(&quot;Message must have a target.&quot;);
+        }
+        if (msg.isInUse()) {
+            throw new IllegalStateException(msg + &quot; This message is already in use.&quot;);
+        }
+
+        synchronized (this) {
+            if (mQuitting) {
+                IllegalStateException e = new IllegalStateException(
+                        msg.target + &quot; sending message to a Handler on a dead thread&quot;);
+                Log.w(TAG, e.getMessage(), e);
+                msg.recycle();
+                return false;
+            }
+
+            msg.markInUse();
+            msg.when = when;
+            Message p = mMessages;
+            boolean needWake;
+            if (p == null || when == 0 || when &lt; p.when) {
+                // New head, wake up the event queue if blocked.
+                msg.next = p;
+                mMessages = msg;
+                needWake = mBlocked;
+            } else {
+                // Inserted within the middle of the queue.  Usually we don't have to wake
+                // up the event queue unless there is a barrier at the head of the queue
+                // and the message is the earliest asynchronous message in the queue.
+                needWake = mBlocked &amp;&amp; p.target == null &amp;&amp; msg.isAsynchronous();
+                Message prev;
+                for (;;) {
+                    prev = p;
+                    p = p.next;
+                    if (p == null || when &lt; p.when) {
+                        break;
+                    }
+                    if (needWake &amp;&amp; p.isAsynchronous()) {
+                        needWake = false;
+                    }
+                }
+                msg.next = p; // invariant: p == prev.next
+                prev.next = msg;
+            }
+
+            // We can assume mPtr != 0 because mQuitting is false.
+            if (needWake) {
+                nativeWake(mPtr);
+            }
+        }
+        return true;
+    }
+</code></pre>
+<p>说了这么久终于要进入关键步骤了。</p>
+<ul>
+<li>
+<p>首先判断是否有target，target默认是当前的looper对象</p>
+</li>
+<li>
+<p>判断是否是已经放进来过。如果已经存入就抛出异常</p>
+</li>
+<li>
+<p>使用<code>synchronized</code>来进行线程同步</p>
+</li>
+<li>
+<p>接着判断当前thread是否已经处于dead的状态</p>
+</li>
+<li>
+<p>把当前的Message标记为use状态</p>
+</li>
+<li>
+<p>给Message设置执行时间。</p>
+<ul>
+<li>注意这个执行时间并不是系统当前的时间而是SystemClock.uptimeMillis()，其是系统开机到目前的时间，期间不包括休眠的时间，这里获得的时间是一个相对的时间。使用这种方式而不是当前时间是因为handler会受到阻塞、挂起、睡眠等待。这种情况下，delay的事件时不应该被执行的</li>
+</ul>
+</li>
+<li>
+<p>先判断当前有没有任务正在执行或者当前是个需要马上被执行的消息、或者当前的消息比马上正要执行的消息的when要小。</p>
+<ul>
+<li>上面可能有点难以理解，大家可以想一下，我们使用handler的过程中可能会post很多延时消息同时也会直接send一个message，如果Post在send之前调用，那么MessageQueue内部就需要判断在同一个线程中的任务的执行顺序。</li>
+</ul>
+</li>
+<li>
+<p>如果没有满足上面的条件，那么就把当前的消息根据when的大小来进行排序插入到当前的链表中。</p>
+</li>
+<li>
+<p>然后通过needWake参数来判断是否需要唤醒执行任务。</p>
+</li>
+</ul>
+<p>以上就是整个将Message添加到队列中的全部过程。</p>
+<h4 id="消息的分发">消息的分发</h4>
+<p>经过上文的分析我们知道handler是通过looper的loop方法从MessageQueue中取到需要执行的任务，然后执行。那么就来看一下具体实现：</p>
+<pre><code class="language-java">        for (;;) {
+            Message msg = queue.next(); // might block
+            if (msg == null) {
+                // No message indicates that the message queue is quitting.
+                return;
+            }
+
+            // This must be in a local variable, in case a UI event sets the logger
+            final Printer logging = me.mLogging;
+            if (logging != null) {
+                logging.println(&quot;&gt;&gt;&gt;&gt;&gt; Dispatching to &quot; + msg.target + &quot; &quot; +
+                        msg.callback + &quot;: &quot; + msg.what);
+            }
+
+            final long traceTag = me.mTraceTag;
+            long slowDispatchThresholdMs = me.mSlowDispatchThresholdMs;
+            long slowDeliveryThresholdMs = me.mSlowDeliveryThresholdMs;
+            if (thresholdOverride &gt; 0) {
+                slowDispatchThresholdMs = thresholdOverride;
+                slowDeliveryThresholdMs = thresholdOverride;
+            }
+            final boolean logSlowDelivery = (slowDeliveryThresholdMs &gt; 0) &amp;&amp; (msg.when &gt; 0);
+            final boolean logSlowDispatch = (slowDispatchThresholdMs &gt; 0);
+
+            final boolean needStartTime = logSlowDelivery || logSlowDispatch;
+            final boolean needEndTime = logSlowDispatch;
+
+            if (traceTag != 0 &amp;&amp; Trace.isTagEnabled(traceTag)) {
+                Trace.traceBegin(traceTag, msg.target.getTraceName(msg));
+            }
+
+            final long dispatchStart = needStartTime ? SystemClock.uptimeMillis() : 0;
+            final long dispatchEnd;
+            try {
+                msg.target.dispatchMessage(msg);
+                dispatchEnd = needEndTime ? SystemClock.uptimeMillis() : 0;
+            } finally {
+                if (traceTag != 0) {
+                    Trace.traceEnd(traceTag);
+                }
+            }
+            if (logSlowDelivery) {
+                if (slowDeliveryDetected) {
+                    if ((dispatchStart - msg.when) &lt;= 10) {
+                        Slog.w(TAG, &quot;Drained&quot;);
+                        slowDeliveryDetected = false;
+                    }
+                } else {
+                    if (showSlowLog(slowDeliveryThresholdMs, msg.when, dispatchStart, &quot;delivery&quot;,
+                            msg)) {
+                        // Once we write a slow delivery log, suppress until the queue drains.
+                        slowDeliveryDetected = true;
+                    }
+                }
+            }
+            if (logSlowDispatch) {
+                showSlowLog(slowDispatchThresholdMs, dispatchStart, dispatchEnd, &quot;dispatch&quot;, msg);
+            }
+
+            if (logging != null) {
+                logging.println(&quot;&lt;&lt;&lt;&lt;&lt; Finished to &quot; + msg.target + &quot; &quot; + msg.callback);
+            }
+
+            // Make sure that during the course of dispatching the
+            // identity of the thread wasn't corrupted.
+            final long newIdent = Binder.clearCallingIdentity();
+            if (ident != newIdent) {
+                Log.wtf(TAG, &quot;Thread identity changed from 0x&quot;
+                        + Long.toHexString(ident) + &quot; to 0x&quot;
+                        + Long.toHexString(newIdent) + &quot; while dispatching to &quot;
+                        + msg.target.getClass().getName() + &quot; &quot;
+                        + msg.callback + &quot; what=&quot; + msg.what);
+            }
+
+            msg.recycleUnchecked();
+        }
+</code></pre>
+<p>首先通过queue.next方法取出一个任务，然后通过<code>msg.target.dispatchMessage(msg);</code>进行消息的分发；整个过程好像是非常简单的。这里有几个点比较有意思</p>
+<ul>
+<li>在进行消息分发的前后会通过<code>SystemClock.uptimeMillis()</code>来获取到系统开机到目前的时间(不包括被阻塞和挂起的时间)来进行必要的日志输出。</li>
+<li>最终将已经分发过的消息进行recycle</li>
+</ul>
+<h4 id="总结">总结</h4>
+<p>以上就是整个handler的大概流程分析，当然可能还存在一些不严谨的地方，只是作为本人对于handler理解的一些记录。如果有错误的地方，希望海涵。</p>
+<h4 id="拓展">拓展:</h4>
+<h5 id="为什么handlerpostdelay方法不会造成anr呢">为什么handler.postDelay方法不会造成ANR呢？</h5>
+<ul>
+<li>Looper.loop( )是会让主线程进入死循环。但是不会卡主程序，卡住程序主要是handleMessage处理消息的时候来不及处理导致的。Android的消息处理机制是事件驱动型的。</li>
+</ul>
+<h5 id="应用在使用过程中发生了anr-是发生在哪个方法">应用在使用过程中发生了ANR 是发生在哪个方法？</h5>
+<ul>
+<li>通过上面的分析，消息的分发都是通过dispatchMessage来做的，所以如果发生了anr都会在这里产生。</li>
+</ul>
+<h4 id="参考资料">参考资料</h4>
+<p><a href="http://www.jasongj.com/java/threadlocal/">Java进阶（七）正确理解Thread Local的原理与适用场景</a></p>
+]]></content>
+    </entry>
     <entry>
         <title type="html"><![CDATA[再学Android：Activity启动流程]]></title>
         <id>https://alsowell.github.io//post/zai-xue-androidactivity-qi-dong-liu-cheng</id>
@@ -2055,336 +2368,6 @@ http 100-continue用于客户端在发送POST数据给服务器前，征询服�
 <li>对接口的请求做一遍处理，比如gzip、cookie 最后解析成用户真正可使用的body。</li>
 </ul>
 <p>可以看到整个BridgeInterceptor的流程还是非常简单的，无非就是对网络传输协议中一些必须参数的封装，这样应用层在调用的时候就省去了这些步骤。</p>
-]]></content>
-    </entry>
-    <entry>
-        <title type="html"><![CDATA[再学Android:OkHttp源码探究(三) RetryAndFollowUpInterceptor]]></title>
-        <id>https://alsowell.github.io//post/zai-xue-androidokhttp-yuan-ma-tan-jiu-san-retryandfollowupinterceptor</id>
-        <link href="https://alsowell.github.io//post/zai-xue-androidokhttp-yuan-ma-tan-jiu-san-retryandfollowupinterceptor">
-        </link>
-        <updated>2019-11-21T12:17:21.000Z</updated>
-        <content type="html"><![CDATA[<h4 id="前言">前言</h4>
-<p>前面的文章我们分析了整个okhttp的核心其实是getResponseWithInterceptor方法。内部是通过一系列的拦截器调用来完成整个网络请求。我们也知道了ok内部定义了五个拦截器。拦截器又是通过责任链模式来递归进行调用。本篇文章我们将按照加载顺序来分析第一个拦截器<strong>RetryAndFollowUpInterceptor</strong></p>
-<p>####介绍</p>
-<p>按照字面意思来理解就是一个管理重试和后续动作的拦截器，那么究竟是怎么做的呢？简单，上注释！</p>
-<pre><code class="language-kotlin">//这个拦截器主要是用来处理失败和重定向的请求，如果请求被取消可能会抛出io异常 
-/**
- * This interceptor recovers from failures and follows redirects as necessary. It may throw an
- * [IOException] if the call was canceled.
- */
-</code></pre>
-<p>看来前面的理解也没有问题，规范的命名确实能让人一看就知道什么意思。那直接进入正文。</p>
-<h4 id="核心功能">核心功能</h4>
-<ul>
-<li>
-<p>失败重试</p>
-<ul>
-<li>在遇到RouteException和IOException通过recover()方法判断当前请求是否可以重新尝试。</li>
-</ul>
-</li>
-<li>
-<p>继续发起请求</p>
-<ul>
-<li>
-<p>通过followUpRequest()方法来判断当前是否可以继续发起请求，主要根据响应码来判断</p>
-<table>
-<thead>
-<tr>
-<th>应码</th>
-<th>说明</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td>07</td>
-<td>代理鉴权失败、调用 Authenticator 进行授权后继续发起新的请求</td>
-</tr>
-<tr>
-<td>01</td>
-<td>鉴权失败、调用 Authenticator 进行授权后继续发起新的请求</td>
-</tr>
-<tr>
-<td>07、308</td>
-<td>重定向，method不为get 和head情况下 ，重新发起新的请求</td>
-</tr>
-<tr>
-<td>00、301、302、303</td>
-<td>重定向，重新发起新的请求</td>
-</tr>
-<tr>
-<td>08</td>
-<td>客户端请求超时，会继续发起新的请求</td>
-</tr>
-<tr>
-<td>03</td>
-<td>服务不可用，会继续发起新的请求</td>
-</tr>
-<tr>
-<td>lse</td>
-<td>直接发起新的请求</td>
-</tr>
-</tbody>
-</table>
-<ul>
-<li>注意：请求重试次数是受到MAX_FOLLOW_UPS 限制的，默认是20</li>
-</ul>
-</li>
-</ul>
-</li>
-</ul>
-<p>经过前面文章的分析我们知道每一个拦截器都是在intercept里面操作的，那我们直接来分析一下：</p>
-<pre><code class="language-kotlin">@Throws(IOException::class)
-  override fun intercept(chain: Interceptor.Chain): Response {
-    var request = chain.request()
-    //1
-    val realChain = chain as RealInterceptorChain
-    val transmitter = realChain.transmitter()
-    var followUpCount = 0
-    var priorResponse: Response? = null
-    while (true) {
-      //2
-      transmitter.prepareToConnect(request)
-      if (transmitter.isCanceled) {
-        throw IOException(&quot;Canceled&quot;)
-      }
-      var response: Response
-      var success = false
-      try {
-        //3
-        response = realChain.proceed(request, transmitter, null)
-        success = true
-      } catch (e: RouteException) {
-        // The attempt to connect via a route failed. The request will not have been sent.
-        if (!recover(e.lastConnectException, transmitter, false, request)) {
-          throw e.firstConnectException
-        }
-        continue
-        //4
-      } catch (e: IOException) {
-        // An attempt to communicate with a server failed. The request may have been sent.
-        val requestSendStarted = e !is ConnectionShutdownException
-        if (!recover(e, transmitter, requestSendStarted, request)) throw e
-        continue
-      } finally {
-        // The network call threw an exception. Release any resources.
-        if (!success) {
-          transmitter.exchangeDoneDueToException()
-        }
-      }
-      // Attach the prior response if it exists. Such responses never have a body.
-      if (priorResponse != null) {
-        response = response.newBuilder()
-            .priorResponse(priorResponse.newBuilder()
-                .body(null)
-                .build())
-            .build()
-      }
-      val exchange = response.exchange
-      val route = exchange?.connection()?.route()
-      //5
-      val followUp = followUpRequest(response, route)
-      if (followUp == null) {
-        if (exchange != null &amp;&amp; exchange.isDuplex) {
-          transmitter.timeoutEarlyExit()
-        }
-        return response
-      }
-      val followUpBody = followUp.body
-      //6
-      if (followUpBody != null &amp;&amp; followUpBody.isOneShot()) {
-        return response
-      }
-      response.body?.closeQuietly()
-      if (transmitter.hasExchange()) {
-        exchange?.detachWithViolence()
-      }
-      //7
-      if (++followUpCount &gt; MAX_FOLLOW_UPS) {
-        throw ProtocolException(&quot;Too many follow-up requests: $followUpCount&quot;)
-      }
-      request = followUp
-      priorResponse = response
-    }
-  }
-</code></pre>
-<h4 id="主要步骤">主要步骤</h4>
-<ul>
-<li>
-<p>在上一篇文章中我们分析过，拦截器会通过构造RealInterceptorChain对象，并且把其作为参数通过调用当前interceptor的intercept方法来进行递归调用。并且也知道可以通过chain来获取到request、connection等对象。同样在重试拦截器中也是一样。第一步首先是拿到request 、realChain、transmitter对象。</p>
-</li>
-<li>
-<p>进入到while循环中，首先调用transmitter的prepareToConnect方法。我们跟进去看一下：</p>
-<pre><code class="language-kotlin">fun prepareToConnect(request: Request) {
-    if (this.request != null) {
-      if (this.request!!.url.canReuseConnectionFor(request.url) &amp;&amp; exchangeFinder!!.hasRouteToTry()) {
-        return // Already ready.
-      }
-      check(exchange == null)
-      if (exchangeFinder != null) {
-        maybeReleaseConnection(null, true)
-        exchangeFinder = null
-      }
-    }
-    this.request = request
-    this.exchangeFinder = ExchangeFinder(
-        this, connectionPool, createAddress(request.url), call, eventListener)
-  }
-</code></pre>
-<ul>
-<li>不是第一次进入这个方法的时候
-<ul>
-<li>首先会判断是否可以服用连接池并且仍然处于重试过程中。</li>
-<li>如果exchangeFinder不为空情况下 尝试关闭连接。并且回调eventListener connectionReleased方法，接着根据请求是否失败回调callFailed或者callEnd</li>
-</ul>
-</li>
-<li>首次进入情况下
-<ul>
-<li>构建出exchangeFinder对象，为后续的网络连接做准备</li>
-</ul>
-</li>
-</ul>
-</li>
-<li>
-<p>判断请求是否被取消，如果取消抛出异常。</p>
-<ul>
-<li>
-<pre><code class="language-kotlin">  fun cancel() {
-    val exchangeToCancel: Exchange?
-    val connectionToCancel: RealConnection?
-    synchronized(connectionPool) {
-      canceled = true
-      exchangeToCancel = exchange
-      connectionToCancel = exchangeFinder?.connectingConnection() ?: connection
-    }
-    exchangeToCancel?.cancel() ?: connectionToCancel?.cancel()
-  }
-</code></pre>
-</li>
-</ul>
-<p>通过调用链我们可以发现，这个方法只会在应用层通过Call对象的cancel方法调用到。</p>
-</li>
-<li>
-<p>调用realChain的proceed方法</p>
-<ul>
-<li>
-<p>还记得我们在上一篇文章中分析过这个方法其实是递归调用后续的拦截器并且将下一级的结果返回到当前处理。</p>
-</li>
-<li>
-<p>通过try-catch 捕获在网络请求过程中可能出现的异常，如果未发生异常success为true，反之为false。</p>
-<ul>
-<li>
-<p>RouteException</p>
-<ul>
-<li>异常发生在请求还没发出之前，追溯源码会发现其实是发生在connect过程中。</li>
-</ul>
-</li>
-<li>
-<p>IOException</p>
-<ul>
-<li>异常发生请求可能已经发出，并且在读取服务端的响应过程中出错。</li>
-</ul>
-</li>
-<li>
-<p>通过recover方法判断是否是值得重试的异常，判断依据如下：</p>
-<pre><code class="language-kotlin"> private fun recover(
-    e: IOException,
-    transmitter: Transmitter,
-    requestSendStarted: Boolean,
-    userRequest: Request
-  ): Boolean {
-    // The application layer has forbidden retries.
-    if (!client.retryOnConnectionFailure) return false
-    // We can't send the request body again.
-    if (requestSendStarted &amp;&amp; requestIsOneShot(e, userRequest)) return false
-    // This exception is fatal.
-    if (!isRecoverable(e, requestSendStarted)) return false
-    // No more routes to attempt.
-    if (!transmitter.canRetry()) return false
-    // For failure recovery, use the same route selector with a new connection.
-    return true
-  }
-</code></pre>
-<ul>
-<li>
-<p>应用层设置失败是否重试</p>
-<figure data-type="image" tabindex="1"><img src="/Users/mc/Desktop/%E6%96%87%E7%AB%A0%E5%9B%BE%E7%89%87/WechatIMG133355.tiff" alt=""></figure>
-</li>
-<li>
-<p>是否有相同的请求正在执行</p>
-</li>
-<li>
-<p>是否是可恢复的异常</p>
-</li>
-<li>
-<pre><code class="language-kotlin">private fun isRecoverable(e: IOException, requestSendStarted: Boolean): Boolean {
-    if (e is ProtocolException) {
-      return false
-    }
-    if (e is InterruptedIOException) {
-      return e is SocketTimeoutException &amp;&amp; !requestSendStarted
-    }
-    if (e is SSLHandshakeException) {
-      if (e.cause is CertificateException) {
-        return false
-      }
-    }
-    if (e is SSLPeerUnverifiedException) {
-      return false
-    }
-    return true
-  }
-</code></pre>
-<ul>
-<li>
-<p>ProtocolException 协议异常</p>
-<p><img src="/Users/mc/Desktop/%E6%96%87%E7%AB%A0%E5%9B%BE%E7%89%87/1574337835415.jpg" alt="">主要发生在 RealConnection 中创建 HTTPS 通过 HTTP 代理进行连接重试超过 21 次。</p>
-</li>
-</ul>
-</li>
-<li>
-<p>InterruptedIOException</p>
-<ul>
-<li>io终端异常，但是如果当前是一个连接超时异常，会进入到后续的判断，即根据响应码判断是否可重试。</li>
-</ul>
-</li>
-<li>
-<p>SSLHandshakeException</p>
-<ul>
-<li>https握手失败异常，不可重试。</li>
-</ul>
-</li>
-<li>
-<p>SSLPeerUnverifiedException</p>
-<ul>
-<li>网站的证书是不可信任的异常，不可重试</li>
-</ul>
-</li>
-</ul>
-</li>
-</ul>
-</li>
-</ul>
-</li>
-<li>
-<p>是否已经失败过并且具有可以重试的route</p>
-</li>
-<li>
-<p>如果请求未成功那么释放在上一次请求过程中的所有资源</p>
-</li>
-<li>
-<p>从response中获取到 exchange、route对象。</p>
-</li>
-<li>
-<p>调用followUpRequest方法 根据上次请求的返回码来确定是否需要重新尝试，关于响应码的分析在文章开头已经介绍过。</p>
-</li>
-<li>
-<p>自增记录重试次数并且判断是否超过默认值</p>
-</li>
-</ul>
-<h4 id="总结">总结</h4>
-<p>经过上面的分析我们可以知道：重试拦截器其实内部的逻辑还是有点小复杂的，首先定义了每个请求的最大默认尝试次数。然后在请求没有获取到响应时通过异常类型来判断是否可以继续重试。在获取到响应体阶段则是通过状态吗来判断。这里是不是更好理解：okhttp每个拦截器都是分为了Request阶段和Response阶段。到这里，我们对RetryAndFollowUpInterceptor的分析就告一段落了，下一章将会分析BridgeInterceptor。</p>
-<h4 id="参考资料">参考资料</h4>
-<p><a href="https://juejin.im/post/5aa23fa46fb9a028cb2d3a96">源码分析三：OkHttp—RetryAndFollowUpInterceptor</a></p>
 ]]></content>
     </entry>
 </feed>
