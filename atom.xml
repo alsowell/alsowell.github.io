@@ -2,7 +2,7 @@
 <feed xmlns="http://www.w3.org/2005/Atom">
     <id>https://alsowell.github.io/</id>
     <title>ALSOWELL`Blog</title>
-    <updated>2019-12-17T09:02:21.723Z</updated>
+    <updated>2019-12-20T12:30:21.725Z</updated>
     <generator>https://github.com/jpmonette/feed</generator>
     <link rel="alternate" href="https://alsowell.github.io/"/>
     <link rel="self" href="https://alsowell.github.io//atom.xml"/>
@@ -190,7 +190,7 @@
 <p>说了这么久终于要进入关键步骤了。</p>
 <ul>
 <li>
-<p>首先判断是否有target，target默认是当前的looper对象</p>
+<p>首先判断是否有target，target默认是当前的Handler对象</p>
 </li>
 <li>
 <p>判断是否是已经放进来过。如果已经存入就抛出异常</p>
